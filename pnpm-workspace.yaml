@@ -1,0 +1,9 @@
+packages:
+  - sso-server
+  - internal-app
+  - external-app
+
+ignoredBuiltDependencies:
+  - '@astryxdesign/core'
+  - sharp
+  - unrs-resolver
