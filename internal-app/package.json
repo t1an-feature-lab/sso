@@ -14,8 +14,12 @@
     "@astryxdesign/theme-neutral": "0.7.16",
     "@stylexjs/stylex": "0.19.2",
     "next": "16.4.6",
+    "pg": "8.23.1",
+    "pg-hstore": "2.3.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "sequelize": "^6.37.8",
+    "server-only": "0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",
