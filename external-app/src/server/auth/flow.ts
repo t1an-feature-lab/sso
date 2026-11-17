@@ -1,12 +1,16 @@
 import { Provider } from '@/common/provider'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { getGitHubAuthorizationUrl, getGitHubIdentity } from './github'
 import { getGoogleAuthorizationUrl, getGoogleIdentity } from './google'
 import { cookies } from 'next/headers'
 import { findOrCreateUser } from './users'
 import { createSession } from './session'
 
-type AuthorizationUrlGetter = (redirectUri: string, state: string) => string
+type AuthorizationUrlGetter = (
+  redirectUri: string,
+  state: string,
+  codeChallenge: string
+) => string
 
 const providerAuthorizationUrl: Record<Provider, AuthorizationUrlGetter> = {
   github: getGitHubAuthorizationUrl,
@@ -22,16 +26,24 @@ export async function beginLogin(provider: Provider): Promise<string> {
 
   // node:crypto 导入的 randomBytes 生成 32 个字节的密码学安全随机数
   const state = randomBytes(32).toString('base64url')
+  // 服务器每次登录生成的随机字符串，临时保存到 Cookie，等回调兑换 token 时再用
+  const codeVerifier = randomBytes(32).toString('base64url')
+  // 对 verifier 做 SHA-256，再做 Base64URL 编码的结果，发给 GitHub。后续github生成的code会和codeChallenge进行绑定
+  // 和state不同，github不会原样返回
+  const codeChallenge = createHash('sha256')
+    .update(codeVerifier)
+    .digest('base64url')
 
   const redirectUri = new URL(
     `/api/auth/${provider}/callback`,
     appUrl
   ).toString()
 
-  // 例如provider是github，返回：`https://github.com/login/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}scope=read:user%20user:email&state=${state}
+  // 例如provider是github，返回：https://github.com/login/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}scope=read:user%20user:email&state=${state}
   const authorizationUrl = providerAuthorizationUrl[provider](
     redirectUri,
-    state
+    state,
+    codeChallenge
   )
 
   const cookieStore = await cookies()
@@ -40,7 +52,7 @@ export async function beginLogin(provider: Provider): Promise<string> {
 
   cookieStore.set(
     cookieName,
-    JSON.stringify({ provider, state }), // 存储自定义数据，方便校验state
+    JSON.stringify({ provider, state, codeVerifier }), // 存储自定义数据，方便校验state
     {
       httpOnly: true,
       secure,
@@ -63,7 +75,8 @@ type LoginCallbackParams = {
 type IdentityGetter = (
   code: string,
   redirectUrl: string,
-  iss: string | null
+  iss: string | null,
+  codeVerifier: string
 ) => Promise<{ providerUserId: string; username: string; avatarUrl: string }>
 
 const providerIdentityGetter: Record<Provider, IdentityGetter> = {
@@ -112,7 +125,8 @@ export async function finishLogin(
     typeof saved !== 'object' ||
     saved === null ||
     !('state' in saved) ||
-    saved.state !== state
+    saved.state !== state ||
+    !('codeVerifier' in saved)
   ) {
     throw new Error('登录状态校验失败，请重新发起登录')
   }
@@ -134,10 +148,13 @@ export async function finishLogin(
     throw new Error('缺少授权码，请重新发起登录')
   }
 
+  const codeVerifier = saved.codeVerifier as string
+
   const identity = await providerIdentityGetter[provider](
     code,
     redirectUri,
-    iss
+    iss,
+    codeVerifier
   )
 
   const user = await findOrCreateUser(provider, identity)

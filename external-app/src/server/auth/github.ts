@@ -1,6 +1,7 @@
 export function getGitHubAuthorizationUrl(
   redirectUri: string,
-  state: string
+  state: string,
+  codeChallenge: string
 ): string {
   const clientId = process.env.GITHUB_CLIENT_ID
 
@@ -13,8 +14,11 @@ export function getGitHubAuthorizationUrl(
   url.search = new URLSearchParams({
     client_id: clientId, // 必需参数，从 GitHub 应用设置里获取
     redirect_uri: redirectUri,
+    prompt: 'select_account', // 每次都弹出账户选择器，没有prompt的话，登录过的用户会直接授权成功，当然也是会走其他流程，只是github的前端不展示了
     scope: 'read:user user:email', // 访问权限范围
-    state // 随机字符串，用于防 CSRF，这个参数会被github原样返回，必须是state名称。校验工作完全由三方应用自己完成
+    state, // 随机字符串，用于防 CSRF，这个参数会被github原样返回，必须是state名称。校验工作完全由三方应用自己完成
+    code_challenge: codeChallenge, // pkce challenge码
+    code_challenge_method: 'S256'
   }).toString()
 
   return url.toString()
@@ -29,7 +33,8 @@ export function validateGitHubIssuer(iss: string | null): void {
 export async function getGitHubIdentity(
   code: string,
   redirectUri: string,
-  iss: string | null
+  iss: string | null,
+  codeVerifier: string
 ) {
   // 校验来源
   validateGitHubIssuer(iss)
@@ -53,7 +58,9 @@ export async function getGitHubIdentity(
         client_id: clientId,
         client_secret: clientSecret,
         code,
-        redirect_uri: redirectUri
+        redirect_uri: redirectUri,
+        // 在上面授权的时候，会将code和code_challenge进行绑定，现在github会通过code_verifier+code，去重新生成code_challenge比较是否一致
+        code_verifier: codeVerifier,
       }),
       cache: 'no-store',
       // 避免携带 client_secret 的请求被自动重定向。
