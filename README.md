@@ -17,9 +17,9 @@ sso/
 docker compose up -d --wait
 ```
 
-本地开发使用 PostgreSQL 18，地址为 `127.0.0.1:5432`，用户名和密码均为 `postgres`。首次初始化数据目录时，`docker/postgres/init.sql` 会创建 `sso_server`、`internal_app`、`external_app` 三个数据库，并在 `external_app` 中创建用户表。应用连接配置已对应这些数据库，应用请求不再自动建表。
+本地开发使用 PostgreSQL 18，地址为 `127.0.0.1:5432`，用户名和密码均为 `postgres`。首次初始化数据目录时，`docker/postgres/init.sql` 会创建 `sso_server`、`internal_app`、`external_app` 三个数据库，并在 `external_app` 中创建用户表。
 
-已有数据卷不会重新执行初始化 SQL。已有用户表可以继续使用；如果 `external_app` 库中缺少用户表，需要连接该库并单独执行 `init.sql` 中的建表语句。
+自动同步不会删除或修改已有列，字段改名、类型调整等变更需要单独迁移。生产环境不执行自动同步，表结构由 SQL 或迁移管理。
 
 ## 启动项目
 

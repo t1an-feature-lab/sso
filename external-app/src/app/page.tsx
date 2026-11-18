@@ -1,21 +1,27 @@
 import { redirect } from 'next/navigation'
-import { Avatar } from '@astryxdesign/core/Avatar'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { Center } from '@astryxdesign/core/Center'
+import { IconButton } from '@astryxdesign/core/IconButton'
 import { VStack } from '@astryxdesign/core/Layout'
-import { Heading, Text } from '@astryxdesign/core/Text'
 import { logout } from '@/server/auth/actions'
 import { getCurrentUser } from '@/server/auth/users'
+import { AccountProfile, profileStrategies } from './profile-strategies'
 
-export default async function Home() {
+export default async function Home({
+  searchParams
+}: {
+  searchParams: Promise<{ view?: string | string[] }>
+}) {
   const user = await getCurrentUser()
 
   if (!user) {
     redirect('/login')
   }
 
-  const nickname = user.username || '未设置昵称'
+  const showProvider = (await searchParams).view === 'provider'
+  const { label, Component: ProviderProfile } = profileStrategies[user.provider]
+  const switchLabel = showProvider ? '查看本站资料' : `查看 ${label} 资料`
 
   return (
     <main aria-label='账户'>
@@ -25,30 +31,40 @@ export default async function Home() {
         minHeight='100dvh'
         style={{ backgroundColor: 'var(--color-background-body)' }}
       >
-        <Card padding={8} width='100%' maxWidth={400}>
-          <VStack gap={6} hAlign='stretch'>
-            <VStack gap={3} hAlign='center'>
-              <Avatar
-                src={user.avatarUrl ?? undefined}
-                name={nickname}
-                alt={`${nickname}的头像`}
-                size={64}
-              />
-              <Heading
-                level={1}
-                justify='center'
-                style={{ overflowWrap: 'anywhere', maxWidth: '100%' }}
+        <Card padding={8} width='100%' maxWidth={400} style={{ position: 'relative' }}>
+          <IconButton
+            as='a'
+            href={showProvider ? '/' : '/?view=provider'}
+            label={switchLabel}
+            tooltip={switchLabel}
+            variant='ghost'
+            style={{ position: 'absolute', top: 12, right: 12, minWidth: 40, minHeight: 40 }}
+            icon={
+              <svg
+                viewBox='0 0 24 24'
+                width={20}
+                height={20}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={1.75}
+                strokeLinecap='round'
+                strokeLinejoin='round'
+                aria-hidden='true'
               >
-                {nickname}
-              </Heading>
-            </VStack>
-
-            <VStack gap={2} hAlign='stretch'>
-              <Text type='supporting'>用户 ID</Text>
-              <Text as='p' type='code' style={{ overflowWrap: 'anywhere' }}>
-                {user.id}
-              </Text>
-            </VStack>
+                <path d='M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4' />
+              </svg>
+            }
+          />
+          <VStack gap={6} hAlign='stretch'>
+            {showProvider ? (
+              <ProviderProfile />
+            ) : (
+              <AccountProfile
+                id={user.id}
+                username={user.username}
+                avatarUrl={user.avatarUrl}
+              />
+            )}
 
             <form action={logout}>
               <Button

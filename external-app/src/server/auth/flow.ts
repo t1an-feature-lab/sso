@@ -5,6 +5,7 @@ import { getGoogleAuthorizationUrl, getGoogleIdentity } from './google'
 import { cookies } from 'next/headers'
 import { findOrCreateUser } from './users'
 import { createSession } from './session'
+import { GitHubTokens } from '../models/user'
 
 type AuthorizationUrlGetter = (
   redirectUri: string,
@@ -77,7 +78,12 @@ type IdentityGetter = (
   redirectUrl: string,
   iss: string | null,
   codeVerifier: string
-) => Promise<{ providerUserId: string; username: string; avatarUrl: string }>
+) => Promise<{
+  providerUserId: string
+  username: string
+  avatarUrl: string
+  githubTokens?: GitHubTokens
+}>
 
 const providerIdentityGetter: Record<Provider, IdentityGetter> = {
   github: getGitHubIdentity,
