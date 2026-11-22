@@ -5,12 +5,13 @@ import { getGoogleAuthorizationUrl, getGoogleIdentity } from './google'
 import { cookies } from 'next/headers'
 import { findOrCreateUser } from './users'
 import { createSession } from './session'
-import { GitHubTokens } from '../models/user'
+import { GitHubTokens, GoogleTokens } from '../models/user'
 
 type AuthorizationUrlGetter = (
   redirectUri: string,
   state: string,
-  codeChallenge: string
+  codeChallenge: string,
+  nonce: string
 ) => string
 
 const providerAuthorizationUrl: Record<Provider, AuthorizationUrlGetter> = {
@@ -27,6 +28,8 @@ export async function beginLogin(provider: Provider): Promise<string> {
 
   // node:crypto 导入的 randomBytes 生成 32 个字节的密码学安全随机数
   const state = randomBytes(32).toString('base64url')
+  // 针对oidc使用，关联登录请求与 id_token，防止重放
+  const nonce = randomBytes(32).toString('base64url')
   // 服务器每次登录生成的随机字符串，临时保存到 Cookie，等回调兑换 token 时再用
   const codeVerifier = randomBytes(32).toString('base64url')
   // 对 verifier 做 SHA-256，再做 Base64URL 编码的结果，发给 GitHub。后续github生成的code会和codeChallenge进行绑定
@@ -44,7 +47,8 @@ export async function beginLogin(provider: Provider): Promise<string> {
   const authorizationUrl = providerAuthorizationUrl[provider](
     redirectUri,
     state,
-    codeChallenge
+    codeChallenge,
+    nonce
   )
 
   const cookieStore = await cookies()
@@ -53,7 +57,7 @@ export async function beginLogin(provider: Provider): Promise<string> {
 
   cookieStore.set(
     cookieName,
-    JSON.stringify({ provider, state, codeVerifier }), // 存储自定义数据，方便校验state
+    JSON.stringify({ provider, state, codeVerifier, nonce }), // 存储自定义数据，方便校验state
     {
       httpOnly: true,
       secure,
@@ -77,12 +81,14 @@ type IdentityGetter = (
   code: string,
   redirectUrl: string,
   iss: string | null,
-  codeVerifier: string
+  codeVerifier: string,
+  nonce: string
 ) => Promise<{
   providerUserId: string
   username: string
-  avatarUrl: string
+  avatarUrl: string | null
   githubTokens?: GitHubTokens
+  googleTokens?: GoogleTokens
 }>
 
 const providerIdentityGetter: Record<Provider, IdentityGetter> = {
@@ -132,7 +138,8 @@ export async function finishLogin(
     saved === null ||
     !('state' in saved) ||
     saved.state !== state ||
-    !('codeVerifier' in saved)
+    !('codeVerifier' in saved) ||
+    !('nonce' in saved)
   ) {
     throw new Error('登录状态校验失败，请重新发起登录')
   }
@@ -155,12 +162,14 @@ export async function finishLogin(
   }
 
   const codeVerifier = saved.codeVerifier as string
+  const nonce = saved.nonce as string
 
   const identity = await providerIdentityGetter[provider](
     code,
     redirectUri,
     iss,
-    codeVerifier
+    codeVerifier,
+    nonce
   )
 
   const user = await findOrCreateUser(provider, identity)

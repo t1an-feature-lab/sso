@@ -5,6 +5,7 @@ import { VStack } from '@astryxdesign/core/Layout'
 import { Heading, Text } from '@astryxdesign/core/Text'
 import type { Provider } from '@/common/provider'
 import { getGitHubProfile } from '@/server/auth/github'
+import { getGoogleProfile } from '@/server/auth/google'
 
 type AccountProfileProps = {
   id: string
@@ -80,16 +81,34 @@ async function GitHubProfile() {
   )
 }
 
-function GoogleProfile() {
+async function GoogleProfile() {
+  let profile
+  let error = ''
+
+  try {
+    profile = await getGoogleProfile()
+  } catch {
+    error = '暂时无法获取 Google 资料，请稍后重试或重新授权。'
+  }
+
+  if (!profile) {
+    return (
+      <VStack gap={3} hAlign='center' style={{ paddingTop: 24 }}>
+        <Heading level={1} justify='center'>Google 用户资料</Heading>
+        <Text as='p' role='alert'>
+          {error || '请重新使用 Google 登录，以获取用户资料'}
+        </Text>
+      </VStack>
+    )
+  }
+
   return (
-    <VStack
-      gap={3}
-      hAlign='center'
-      style={{ minHeight: 178, justifyContent: 'center' }}
-    >
-      <Heading level={1} justify='center'>Google 用户资料</Heading>
-      <Text type='supporting'>暂未接入</Text>
-    </VStack>
+    <AccountProfile
+      id={profile.sub}
+      username={profile.name || profile.sub}
+      avatarUrl={profile.picture || null}
+      idLabel='Google 用户 ID'
+    />
   )
 }
 

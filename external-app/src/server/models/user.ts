@@ -16,6 +16,12 @@ export type GitHubTokens = {
   refreshTokenExpiresAt: number
 }
 
+export type GoogleTokens = {
+  accessToken: string
+  refreshToken: string | null
+  accessTokenExpiresAt: number
+}
+
 class UserModel extends Model<
   InferAttributes<UserModel>,
   InferCreationAttributes<UserModel>
@@ -26,6 +32,7 @@ class UserModel extends Model<
   declare username: string
   declare avatarUrl: string | null
   declare githubTokens: GitHubTokens | null
+  declare googleTokens: GoogleTokens | null
   declare createdAt: CreationOptional<Date>
 }
 
@@ -57,6 +64,10 @@ export const User =
         allowNull: true
       },
       githubTokens: {
+        type: DataTypes.JSONB,
+        allowNull: true
+      },
+      googleTokens: {
         type: DataTypes.JSONB,
         allowNull: true
       },
