@@ -6,7 +6,7 @@ const globalForDb = globalThis as typeof globalThis & {
 }
 
 export const db = globalForDb.ssoServerSequelize ?? new Sequelize(
-  'postgresql://postgres:postgres@127.0.0.1:5432/sso_server',
+  process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@127.0.0.1:5432/sso_server',
   { logging: false }
 )
 

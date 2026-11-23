@@ -57,7 +57,7 @@ async function GitHubProfile() {
   try {
     profile = await getGitHubProfile()
   } catch {
-    error = '暂时无法获取 GitHub 资料，请稍后重试。'
+    error = '暂时无法获取 GitHub 资料，请稍后重试'
   }
 
   if (!profile) {
@@ -88,7 +88,7 @@ async function GoogleProfile() {
   try {
     profile = await getGoogleProfile()
   } catch {
-    error = '暂时无法获取 Google 资料，请稍后重试或重新授权。'
+    error = '暂时无法获取 Google 资料，请稍后重试或重新授权'
   }
 
   if (!profile) {

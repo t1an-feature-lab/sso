@@ -4,6 +4,32 @@
 @import "tailwindcss/preflight.css" layer(base);
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
-@import "@astryxdesign/theme-neutral/theme.css";
 @import "@astryxdesign/core/tailwind-theme.css";
 @import "tailwindcss/utilities.css" layer(utilities);
+
+@layer components {
+  body { margin: 0; font-family: var(--font-family-body, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+  [data-astryx-theme] { color: var(--color-text-primary); font-family: var(--font-family-body); }
+  [data-astryx-theme="neutral"] {
+    --color-accent: #225bff;
+    --color-on-accent: #ffffff;
+  }
+  [popover="manual"]:has(> [data-toast-id]) { align-items: center; }
+  .astryx-dropdown-menu-radio { order: 1; margin-inline-start: auto; }
+
+  .account-trigger {
+    display: block;
+    width: 100%;
+    padding: var(--spacing-2);
+    border: 0;
+    border-radius: var(--radius-element);
+    background: transparent;
+    color: var(--color-text-primary);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .account-trigger:hover,
+  .account-trigger[aria-expanded="true"] { background: var(--color-overlay-hover); }
+  .search-field { width: 320px; max-width: 100%; min-width: 0; }
+}
