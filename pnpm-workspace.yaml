@@ -1,5 +1,5 @@
 packages:
-  - sso-server
+  - auth-center
   - internal-app
   - external-app
 

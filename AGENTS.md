@@ -8,13 +8,14 @@
 
 - 所有应用的界面文案不使用句号（中文 `。` 或英文句末 `.`），包括页面说明、空状态、表单帮助、确认弹窗、Toast 和错误提示
 
-## sso-server 界面主题
+## auth-center 界面主题
 
+- 界面风格保留 **Astryx（Neutral）** 与 **Google Material Design 3（M3）** 两种：默认使用 Astryx；除非用户明确反馈页面不好看、希望换风格或指定使用 M3，否则不要自行切换。采用 M3 风格的页面（如当前登录页）仍需保留亮色、暗色、跟随系统三种模式及 `--color-accent: #225bff` 主色。
 - 默认使用 Astryx 官方 **Neutral** 主题（`@astryxdesign/theme-neutral`），主题包版本与 `@astryxdesign/core` 保持一致。
-- 在 `sso-server` 目录使用 `npx @astryxdesign/cli theme add neutral` 添加主题。
-- 主题入口为 CLI 生成的 `sso-server/src/astryx-themes.ts`；通过 `themes[defaultThemeSlug]` 使用主题，并加载生成入口引用的主题 CSS 和字体 CSS。不要手工编辑该生成文件。
+- 在 `auth-center` 目录使用 `npx @astryxdesign/cli theme add neutral` 添加主题。
+- 主题入口为 CLI 生成的 `auth-center/src/astryx-themes.ts`；通过 `themes[defaultThemeSlug]` 使用主题，并加载生成入口引用的主题 CSS 和字体 CSS。不要手工编辑该生成文件。
 - 沿用 Neutral 原生字体、组件样式、尺寸和间距 token；主色通过 `--color-accent: #225bff` 和 `--color-on-accent: #ffffff` 保持蓝底白字，亮色和暗色模式均生效，其余主题 token 保持 Neutral 默认。
-- 页面布局与间距规范统一适用于 sso-server 前台 Console、管理后台、登录页、应用新增与详情页，以及个人信息和密码弹窗。
+- 页面布局与间距规范统一适用于 auth-center 前台 Console、管理后台、登录页、应用新增与详情页，以及个人信息和密码弹窗。
 - 控制台和独立应用表单的内容区使用 Astryx `Layout` 和 `LayoutContent`，由原生容器统一管理内边距和内容宽度；登录和状态页使用 `Center`。Tab 标签与正文保持同一内容对齐线，带返回按钮的标题栏以返回图标对齐正文，子组件沿用自身原生内边距。
 - 页面标题到内容、Tab 到面板、列表筛选到表格和分页使用 `gap={4}`，独立业务分区之间使用 `gap={6}`；字段间距交由 `FormLayout` 管理，表单 Card 和 Dialog 默认沿用 Neutral 内边距，表格和列表外框使用 `padding={0}`。
 - Tab 栏保留 `TabList hasDivider` 的原生控件高度、轨道留白和选中指示条；独立 Tab 栏使用 `isFullBleed`，带右侧操作的 Tab 栏使用可收缩的 Stack、原生 `edgeCompSlot` 左侧边缘补偿和贯穿整行的原生 Divider，右侧操作与 Tab 控件垂直居中。
@@ -32,4 +33,4 @@
 - 应用新增和详情共用独立、居中的表单页面布局，返回按钮位于标题左侧并与标题同一行，按钮与标题之间使用 Astryx 原生竖向 Divider 分隔；使用 Astryx 原生边缘补偿让返回图标与正文左边缘对齐，保留按钮右侧间距。带返回按钮的页面标题使用 Neutral H3 视觉样式并保留一级标题语义，分区标题使用 H3 视觉样式并保留二级语义；应用列表使用带侧边栏的控制台布局。
 - 应用 Logo 使用头像预览与紧凑上传控件；未上传时根据应用 ID 生成 GitHub 风格的 5×5 左右对称像素图案，新增预览与保存后的图案一致，刷新和重命名保持稳定，上传图片优先展示
 - 应用名称提供占位文字，主页必填，回调地址使用单行输入框，表单底部仅显示提交按钮；新增和编辑不展示 Scopes 字段，新建 OAuth 默认 `profile`，OIDC 默认 `openid profile email`，编辑保留已有 scopes
-- 新增应用直接显示表单；详情使用“应用配置”和“授权用户”两个 Tab，协议标签紧跟标题右侧，删除按钮位于页面内容底部右侧。Client secret 明文只在生成时显示一次，授权用户数量从数据库读取。
+- 新增应用直接显示表单；详情使用“应用配置”和“授权用户”两个 Tab，协议标签紧跟标题右侧，删除按钮位于页面内容底部右侧。Client secret 列表默认脱敏展示，点击查看时重新向服务端请求获取明文，支持隐藏和复制，授权用户数量从数据库读取。

@@ -1,0 +1,287 @@
+@layer components {
+  .login-page {
+    --login-bg: light-dark(#f0f4f9, #1e1f20);
+    --login-surface: light-dark(#ffffff, #0e0e0e);
+    --login-divider: light-dark(#dadce0, #444746);
+    --login-text-primary: light-dark(#1f1f1f, #e3e3e3);
+    --login-text-secondary: light-dark(#444746, #c4c7c5);
+    --login-outline: light-dark(#747775, #8e918f);
+    --login-outline-hover: light-dark(#1f1f1f, #e3e3e3);
+    --login-accent-text: light-dark(var(--color-accent), #8ab4f8);
+    --login-error: light-dark(#b3261e, #f2b8b5);
+    background-color: var(--login-bg);
+  }
+
+  .login-card {
+    --_card-radius: var(--radius-page);
+    --color-background-card: var(--login-surface);
+    border: 0;
+    border-radius: var(--radius-page);
+    background-color: var(--login-surface);
+    color: var(--login-text-primary);
+    overflow: hidden;
+  }
+
+  .login-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--login-divider);
+  }
+
+  .login-brand-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+
+  .login-brand-icon svg {
+    display: block;
+  }
+
+  .login-header-title {
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--login-text-primary);
+  }
+
+  .login-card-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    padding: 28px 24px 32px;
+  }
+
+  .login-intro {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .login-title {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 400;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--login-text-primary);
+  }
+
+  .login-subtitle {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--login-text-primary);
+  }
+
+  .login-destination {
+    color: var(--login-accent-text);
+    font-weight: 500;
+  }
+
+  .login-form {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .login-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .google-field {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .google-field-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .google-field-input {
+    width: 100%;
+    height: 54px;
+    padding: 15px 14px;
+    border: 1px solid var(--login-outline);
+    border-radius: 4px;
+    background-color: transparent;
+    color: var(--login-text-primary);
+    font-family: inherit;
+    font-size: 1rem;
+    line-height: 1.5;
+    outline: none;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+
+  .google-field-input:hover:not(:disabled):not(:focus) {
+    border-color: var(--login-outline-hover);
+  }
+
+  .google-field-input:focus {
+    border-color: var(--login-accent-text);
+    box-shadow: inset 0 0 0 1px var(--login-accent-text);
+  }
+
+  .google-field-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .google-field-label {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    z-index: 1;
+    transform: translateY(-50%);
+    padding: 0 2px;
+    color: var(--login-text-secondary);
+    font-size: 1rem;
+    line-height: 1;
+    pointer-events: none;
+    transform-origin: left center;
+    transition: top 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      left 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      font-size 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      color 150ms ease,
+      background-color 150ms ease;
+  }
+
+  .google-field-box[data-filled="true"] .google-field-label,
+  .google-field-input:focus + .google-field-label,
+  .google-field-input:not(:placeholder-shown) + .google-field-label,
+  .google-field-input:-webkit-autofill + .google-field-label {
+    top: 0;
+    left: 10px;
+    padding: 0 4px;
+    font-size: 0.75rem;
+    background-color: var(--login-surface);
+  }
+
+  .google-field-input:focus + .google-field-label {
+    color: var(--login-accent-text);
+  }
+
+  .google-field[data-invalid="true"] .google-field-input {
+    border-color: var(--login-error);
+  }
+
+  .google-field[data-invalid="true"] .google-field-input:focus {
+    border-color: var(--login-error);
+    box-shadow: inset 0 0 0 1px var(--login-error);
+  }
+
+  .google-field[data-invalid="true"] .google-field-label {
+    color: var(--login-error);
+  }
+
+  .google-field-error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--login-error);
+  }
+
+  .google-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    width: fit-content;
+    margin-top: 12px;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: var(--login-text-primary);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .google-checkbox input {
+    appearance: none;
+    position: relative;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    border: 2px solid var(--login-outline);
+    border-radius: 2px;
+    background-color: transparent;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease;
+  }
+
+  .google-checkbox input:checked {
+    border-color: var(--color-accent);
+    background-color: var(--color-accent);
+  }
+
+  .google-checkbox input:checked::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid var(--color-on-accent);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  .google-checkbox input:focus-visible {
+    outline: 2px solid var(--login-accent-text);
+    outline-offset: 2px;
+  }
+
+  .google-checkbox input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .login-helper {
+    margin: 22px 0 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--login-text-secondary);
+  }
+
+  .login-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 32px;
+  }
+
+  .login-submit-button {
+    height: 40px;
+    min-width: 104px;
+    padding-inline: 24px;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  @media (min-width: 768px) {
+    .login-card-body {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      column-gap: 48px;
+      row-gap: 0;
+      padding: 36px 40px 36px;
+    }
+
+    .login-title {
+      font-size: 2.25rem;
+    }
+
+    .login-form {
+      padding-top: 6px;
+    }
+  }
+}

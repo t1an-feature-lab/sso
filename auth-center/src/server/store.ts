@@ -3,12 +3,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { QueryTypes } from "sequelize";
 import { db } from "./db";
 import { hashPassword } from "./password";
+import { encryptClientSecret } from "./secret-cipher";
 
 const globalStore = globalThis as typeof globalThis & {
   ssoSchemaState?: { version: number; ready: Promise<void> };
 };
 
-const schemaVersion = 4;
+const schemaVersion = 5;
 
 async function initializeStore() {
   const adminPassword = await hashPassword("admin");
@@ -71,12 +72,15 @@ async function initializeStore() {
         id UUID PRIMARY KEY,
         application_id UUID NOT NULL REFERENCES sso_client_applications(id) ON DELETE CASCADE,
         secret_hash CHAR(64) NOT NULL,
+        secret_encrypted TEXT,
         last_four VARCHAR(4) NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         created_by UUID REFERENCES sso_users(id) ON DELETE SET NULL,
         last_used_at TIMESTAMPTZ,
         UNIQUE (application_id, secret_hash)
       );
+      ALTER TABLE sso_client_secrets
+        ADD COLUMN IF NOT EXISTS secret_encrypted TEXT;
       CREATE TABLE IF NOT EXISTS sso_client_authorizations (
         id UUID PRIMARY KEY,
         application_id UUID NOT NULL REFERENCES sso_client_applications(id) ON DELETE CASCADE,
@@ -105,12 +109,13 @@ async function initializeStore() {
     for (const legacy of legacySecrets) {
       await db.query(`
         INSERT INTO sso_client_secrets
-          (id, application_id, secret_hash, last_four, created_at, created_by)
-        VALUES (:id, :applicationId, :hash, :lastFour, :createdAt, :createdBy)
+          (id, application_id, secret_hash, secret_encrypted, last_four, created_at, created_by)
+        VALUES (:id, :applicationId, :hash, :secretEncrypted, :lastFour, :createdAt, :createdBy)
         ON CONFLICT (application_id, secret_hash) DO NOTHING
       `, { transaction, replacements: {
         id: randomUUID(), applicationId: legacy.id,
         hash: createHash("sha256").update(legacy.secret).digest("hex"),
+        secretEncrypted: encryptClientSecret(legacy.secret),
         lastFour: legacy.secret.slice(-4), createdAt: legacy.createdAt, createdBy: legacy.ownerId,
       } });
       await db.query("UPDATE sso_client_applications SET client_secret = '' WHERE id = :id", {

@@ -8,6 +8,7 @@ import type { ActionState, PublicUser } from "@/common/types";
 import { createSession, deleteSession, getCurrentSessionHash, requireUser } from "./auth";
 import { db } from "./db";
 import { hashPassword, verifyPassword } from "./password";
+import { encryptClientSecret } from "./secret-cipher";
 import { ensureStore } from "./store";
 import { readLogo } from "./logo";
 
@@ -77,7 +78,7 @@ export async function loginAction(_previous: ActionState, formData: FormData): P
   }
 
   const requested = value(formData, "next");
-  let destination = user.role === "admin" ? "/admin" : "/";
+  let destination = "/";
   try {
     const target = new URL(requested, "https://sso.local");
     if (requested.startsWith("/") && !requested.startsWith("//") && target.origin === "https://sso.local" && target.pathname !== "/login") {
@@ -376,17 +377,19 @@ export async function generateClientSecretAction(_previous: ActionState, formDat
   const id = value(formData, "id");
   if (!uuid.test(id)) return { error: "应用不存在" };
   const secret = randomBytes(32).toString("base64url");
+  const secretId = randomUUID();
   try {
     const result = await db.transaction(async (transaction): Promise<ActionState> => {
       if (!(await lockApplication(id, user, transaction))) return { error: "应用不存在或无权管理密钥" };
       await db.query(`
-        INSERT INTO sso_client_secrets (id, application_id, secret_hash, last_four, created_by)
-        VALUES (:secretId, :id, :secretHash, :lastFour, :createdBy)
+        INSERT INTO sso_client_secrets (id, application_id, secret_hash, secret_encrypted, last_four, created_by)
+        VALUES (:secretId, :id, :secretHash, :secretEncrypted, :lastFour, :createdBy)
       `, { transaction, replacements: {
-        secretId: randomUUID(), id, secretHash: createHash("sha256").update(secret).digest("hex"),
+        secretId, id, secretHash: createHash("sha256").update(secret).digest("hex"),
+        secretEncrypted: encryptClientSecret(secret),
         lastFour: secret.slice(-4), createdBy: user.id,
       } });
-      return { success: "密钥已生成", id, clientSecret: secret };
+      return { success: "密钥已生成", id, secretId, clientSecret: secret };
     });
     if (result.success) refreshApplications();
     return result;

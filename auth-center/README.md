@@ -1,4 +1,4 @@
-# sso-server
+# auth-center
 
 SSO 服务，使用 Next.js App Router、TypeScript、Tailwind CSS 和 [Astryx](https://astryx.atmeta.com/)。
 
@@ -36,7 +36,7 @@ pnpm typecheck
 
 ## 账户与存储
 
-使用 `src/server/db.ts` 中配置的 PostgreSQL `sso_server` 数据库。首次登录时幂等创建所需表和默认管理员 `admin / admin`，已有管理员密码不会被重置。普通账户使用 11 位大陆手机号，注册密码至少 6 位。
+使用 `src/server/db.ts` 中配置的 PostgreSQL `auth_center` 数据库。首次登录时幂等创建所需表和默认管理员 `admin / admin`，已有管理员密码不会被重置。普通账户使用 11 位大陆手机号，注册密码至少 6 位。
 
 密码通过 scrypt 哈希保存；登录会话使用 HttpOnly Cookie 和数据库中的令牌摘要。应用配置持久化在 PostgreSQL，普通账户只可读取、修改和删除自己的应用。内部子应用初始为空，仅在后台展示列表与详情。OAuth / OIDC 页面提供应用登记与配置管理。
 

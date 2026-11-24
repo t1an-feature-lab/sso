@@ -61,8 +61,8 @@ export async function getApplication(id: string, scope: "own" | "all" = "own"): 
   if (!application) return null;
   const [clientSecrets, authorizedUsers] = await Promise.all([
     db.query<Omit<ClientSecret, "createdAt" | "lastUsedAt"> & { createdAt: Date; lastUsedAt: Date | null }>(`
-      SELECT s.id, s.last_four AS "lastFour", s.created_at AS "createdAt",
-        COALESCE(u.username, '已删除用户') AS "createdBy", s.last_used_at AS "lastUsedAt"
+      SELECT s.id, s.last_four AS "lastFour", (s.secret_encrypted IS NOT NULL) AS "canReveal",
+        s.created_at AS "createdAt", COALESCE(u.username, '已删除用户') AS "createdBy", s.last_used_at AS "lastUsedAt"
       FROM sso_client_secrets s LEFT JOIN sso_users u ON u.id = s.created_by
       WHERE s.application_id = :id ORDER BY s.created_at DESC, s.id
     `, { replacements: { id }, type: QueryTypes.SELECT }),

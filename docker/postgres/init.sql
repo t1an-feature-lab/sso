@@ -1,4 +1,4 @@
-CREATE DATABASE sso_server;
+CREATE DATABASE auth_center;
 CREATE DATABASE internal_app;
 CREATE DATABASE external_app;
 

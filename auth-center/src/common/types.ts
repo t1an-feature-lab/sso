@@ -29,6 +29,7 @@ export type ClientApplication = {
 export type ClientSecret = {
   id: string;
   lastFour: string;
+  canReveal: boolean;
   createdAt: string;
   createdBy: string;
   lastUsedAt: string | null;
@@ -62,5 +63,6 @@ export type ActionState = {
   error?: string;
   fieldErrors?: Record<string, string>;
   id?: string;
+  secretId?: string;
   clientSecret?: string;
 };
