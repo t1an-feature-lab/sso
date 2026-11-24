@@ -27,7 +27,7 @@ import {
   createApplicationAction,
   deleteApplicationAction,
   updateApplicationAction,
-} from "@/server/actions";
+} from "@/server/application/actions";
 
 const protocolNames = { oauth: "OAuth 2.0", oidc: "OpenID Connect" };
 

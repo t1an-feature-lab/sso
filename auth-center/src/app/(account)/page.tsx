@@ -1,7 +1,7 @@
 import { PageHeading } from '@/components/page-heading';
 import { ConsoleApplications } from '@/components/console-applications';
 import { requireUser } from '@/server/auth';
-import { getApplications } from '@/server/queries';
+import { getApplications } from '@/server/application/queries';
 
 export default async function HomePage() {
   const user = await requireUser();

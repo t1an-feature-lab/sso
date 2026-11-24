@@ -16,7 +16,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useAppToast } from "@/components/app-toast";
 import type { AuthorizedApplicationUser, ClientApplicationDetail } from "@/common/types";
 import { TablePager, useTablePage } from "@/components/table-pagination";
-import { revokeAllApplicationTokensAction } from "@/server/actions";
+import { revokeAllApplicationTokensAction } from "@/server/application/actions";
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   dateStyle: "medium",

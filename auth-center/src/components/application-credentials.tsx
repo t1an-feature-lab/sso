@@ -13,7 +13,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useAppToast } from "@/components/app-toast";
 import type { ClientApplicationDetail, ClientSecret } from "@/common/types";
-import { deleteClientSecretAction, generateClientSecretAction } from "@/server/actions";
+import { deleteClientSecretAction, generateClientSecretAction } from "@/server/application/actions";
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   dateStyle: "medium",
