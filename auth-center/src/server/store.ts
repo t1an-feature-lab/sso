@@ -9,7 +9,7 @@ const globalStore = globalThis as typeof globalThis & {
   ssoSchemaState?: { version: number; ready: Promise<void> };
 };
 
-const schemaVersion = 5;
+const schemaVersion = 6;
 
 async function initializeStore() {
   const adminPassword = await hashPassword("admin");
@@ -41,7 +41,6 @@ async function initializeStore() {
       CREATE TABLE IF NOT EXISTS sso_client_applications (
         id UUID PRIMARY KEY,
         owner_id UUID NOT NULL REFERENCES sso_users(id) ON DELETE CASCADE,
-        protocol TEXT NOT NULL CHECK (protocol IN ('oauth', 'oidc')),
         name VARCHAR(80) NOT NULL,
         client_id TEXT NOT NULL UNIQUE,
         client_secret TEXT NOT NULL,
@@ -64,6 +63,7 @@ async function initializeStore() {
         failures INTEGER NOT NULL DEFAULT 0,
         window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE sso_client_applications DROP COLUMN IF EXISTS protocol;
       ALTER TABLE sso_client_applications
         ADD COLUMN IF NOT EXISTS logo_data BYTEA,
         ADD COLUMN IF NOT EXISTS logo_mime TEXT,

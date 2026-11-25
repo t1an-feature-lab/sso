@@ -3,7 +3,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -17,34 +16,31 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useAppToast } from "@/components/app-toast";
 import { VStack } from "@astryxdesign/core/VStack";
-import type { ActionState, ClientApplication, ClientApplicationDetail } from "@/common/types";
+import type { ActionState, ClientApplicationDetail } from "@/common/types";
 import { applicationIdenticon } from "@/common/application-identicon";
 import { ApplicationCredentials } from "@/components/application-credentials";
 import { ApplicationAuthorizations } from "@/components/application-authorizations";
 import { ApplicationLogoInput } from "@/components/application-logo-input";
-import { useUrlTab } from "@/components/use-url-tab";
+import { useRemoveSearchParam, useUrlTab } from "@/components/use-url-tab";
 import {
   createApplicationAction,
   deleteApplicationAction,
   updateApplicationAction,
 } from "@/server/application/actions";
 
-const protocolNames = { oauth: "OAuth 2.0", oidc: "OpenID Connect" };
-
 export function ApplicationForm({
   application,
   applicationId = application?.id,
-  protocol,
   admin = false,
 }: {
   application?: ClientApplicationDetail;
   applicationId?: string;
-  protocol: ClientApplication["protocol"];
   admin?: boolean;
 }) {
   const applicationPath = admin ? "/admin/applications" : "/applications";
-  const listHref = `${admin ? "/admin/applications" : "/"}?protocol=${protocol}`;
-  const title = application?.name ?? `申请 ${protocolNames[protocol]} 应用`;
+  const listHref = admin ? "/admin/applications" : "/";
+  useRemoveSearchParam("protocol");
+  const title = application?.name ?? "申请应用";
   const router = useRouter();
   const toast = useAppToast();
   const [name, setName] = useState(application?.name ?? "");
@@ -141,7 +137,6 @@ export function ApplicationForm({
     <VStack gap={6}>
       {application && <ApplicationCredentials application={application} />}
       <form ref={formRef} onSubmit={submit} noValidate aria-labelledby={titleId} aria-busy={pending || deleting}>
-        <input type="hidden" name="protocol" value={protocol} />
         <input type="hidden" name="status" value={enabled ? "active" : "disabled"} />
         <input type="hidden" name="id" value={applicationId} />
         <VStack gap={6}>
@@ -222,10 +217,7 @@ export function ApplicationForm({
             </StackItem>
             <Divider orientation="vertical" aria-hidden style={{ height: "var(--spacing-5)", flexShrink: 0 }} />
             <StackItem size="fill">
-              <HStack gap={2} vAlign="center">
-                <Heading level={3} accessibilityLevel={1} id={titleId} maxLines={2}>{title}</Heading>
-                {application && <StackItem><Badge label={protocolNames[protocol]} /></StackItem>}
-              </HStack>
+              <Heading level={3} accessibilityLevel={1} id={titleId} maxLines={2}>{title}</Heading>
             </StackItem>
           </HStack>
         </StackItem>

@@ -17,15 +17,13 @@ const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
 
 async function validateApplication(formData: FormData) {
   const name = value(formData, "name");
-  const protocol = value(formData, "protocol");
   const homepage = value(formData, "homepage");
   const status = value(formData, "status") || "active";
   const redirectUri = value(formData, "redirectUris");
   const redirectUris = redirectUri ? [redirectUri] : [];
-  const scopes = protocol === "oidc" ? ["openid", "profile", "email"] : ["profile"];
+  const scopes = ["openid", "profile", "email"];
   const fieldErrors: Record<string, string> = {};
   if (!name || name.length > 80) fieldErrors.name = "请输入 1–80 个字符的应用名称";
-  if (protocol !== "oauth" && protocol !== "oidc") fieldErrors.protocol = "请选择 OAuth 或 OIDC";
   if (status !== "active" && status !== "disabled") fieldErrors.status = "请选择有效的应用状态";
   const validUrl = (uri: string, callback = false) => {
     try {
@@ -42,7 +40,7 @@ async function validateApplication(formData: FormData) {
   if (!homepage || !validUrl(homepage)) fieldErrors.homepage = "请输入有效的 HTTP 或 HTTPS 首页地址";
   const logo = await readLogo(formData);
   if (logo && "error" in logo) fieldErrors.logo = logo.error;
-  return { name, protocol, homepage, status, redirectUris, scopes, fieldErrors, logo: logo && "data" in logo ? logo : null };
+  return { name, homepage, status, redirectUris, scopes, fieldErrors, logo: logo && "data" in logo ? logo : null };
 }
 
 function refreshApplications() {
@@ -59,13 +57,13 @@ export async function createApplicationAction(_previous: ActionState, formData: 
   try {
     await db.query(`
       INSERT INTO sso_client_applications
-        (id, owner_id, protocol, name, client_id, client_secret, redirect_uris, scopes, homepage, status,
+        (id, owner_id, name, client_id, client_secret, redirect_uris, scopes, homepage, status,
           logo_data, logo_mime, logo_updated_at)
-      VALUES (:id, :ownerId, :protocol, :name, :clientId, '',
+      VALUES (:id, :ownerId, :name, :clientId, '',
         CAST(:redirectUris AS JSONB), CAST(:scopes AS JSONB), :homepage, :status,
         :logoData, :logoMime, CASE WHEN :logoMime IS NULL THEN NULL ELSE NOW() END)
     `, { replacements: {
-      id, ownerId: user.id, protocol: application.protocol, name: application.name,
+      id, ownerId: user.id, name: application.name,
       clientId: randomBytes(16).toString("hex"),
       redirectUris: JSON.stringify(application.redirectUris), scopes: JSON.stringify(application.scopes),
       homepage: application.homepage, status: application.status,
@@ -91,10 +89,10 @@ export async function updateApplicationAction(_previous: ActionState, formData: 
         redirect_uris = CAST(:redirectUris AS JSONB),
         homepage = :homepage, status = :status
         ${application.logo ? ", logo_data = :logoData, logo_mime = :logoMime, logo_updated_at = NOW()" : ""}
-      WHERE id = :id AND protocol = :protocol ${user.role === "admin" ? "" : "AND owner_id = :ownerId"}
+      WHERE id = :id ${user.role === "admin" ? "" : "AND owner_id = :ownerId"}
       RETURNING id
     `, { replacements: {
-      id, ownerId: user.id, protocol: application.protocol, name: application.name,
+      id, ownerId: user.id, name: application.name,
       redirectUris: JSON.stringify(application.redirectUris),
       homepage: application.homepage, status: application.status,
       logoData: application.logo?.data ?? null, logoMime: application.logo?.mime ?? null,
@@ -106,6 +104,29 @@ export async function updateApplicationAction(_previous: ActionState, formData: 
   }
   refreshApplications();
   return { success: "配置已保存", id };
+}
+
+export async function setApplicationStatusAction(_previous: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  if (user.role !== "admin") return { error: "无权修改应用状态" };
+  const id = value(formData, "id");
+  const status = value(formData, "status");
+  if (!uuid.test(id)) return { error: "应用不存在" };
+  if (status !== "active" && status !== "disabled") return { error: "请选择有效的应用状态" };
+  try {
+    const rows = await db.query<{ id: string }>(`
+      UPDATE sso_client_applications AS target SET status = :status
+      WHERE target.id = :id
+        AND EXISTS (SELECT 1 FROM sso_users AS actor WHERE actor.id = :actorId AND actor.role = 'admin')
+      RETURNING target.id
+    `, { replacements: { id, status, actorId: user.id }, type: QueryTypes.SELECT });
+    if (!rows.length) return { error: "应用不存在或无权修改" };
+  } catch (error) {
+    console.error("SSO application status update failed", error instanceof Error ? error.name : "UnknownError");
+    return { error: "状态更新失败，请稍后重试" };
+  }
+  refreshApplications();
+  return { success: status === "active" ? "应用已启用" : "应用已停用", id };
 }
 
 export async function deleteApplicationAction(_previous: ActionState, formData: FormData): Promise<ActionState> {

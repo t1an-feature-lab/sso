@@ -15,7 +15,6 @@ export type ClientApplication = {
   id: string;
   ownerId: string;
   ownerName: string;
-  protocol: "oauth" | "oidc";
   name: string;
   clientId: string;
   logoUrl: string;

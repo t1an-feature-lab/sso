@@ -63,7 +63,9 @@ export async function getGoogleIdentity(
     body: new URLSearchParams({
       client_id: clientId,
       client_secret: clientSecret,
-      grant_type: 'authorization_code', // 谷歌文档要求
+      // 因为accesss token和refresh token是使用同一个接口。
+      // 按照谷歌文档要求，表示换access token
+      grant_type: 'authorization_code',
       code,
       redirect_uri: redirectUri,
       code_verifier: codeVerifier

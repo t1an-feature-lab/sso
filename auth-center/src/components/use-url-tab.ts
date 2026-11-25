@@ -1,6 +1,16 @@
 "use client";
 
+import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+
+export function useRemoveSearchParam(parameter: string) {
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has(parameter)) return;
+    url.searchParams.delete(parameter);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [parameter]);
+}
 
 export function useUrlTab<T extends string>(parameter: string, values: readonly T[], defaultValue: T) {
   const searchParams = useSearchParams();

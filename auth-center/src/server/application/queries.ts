@@ -10,7 +10,7 @@ type ApplicationRow = Omit<ClientApplication, "createdAt" | "logoUrl"> & {
   logoUpdatedAt: Date | null;
 };
 
-const applicationColumns = `a.id, a.owner_id AS "ownerId", u.username AS "ownerName", a.protocol,
+const applicationColumns = `a.id, a.owner_id AS "ownerId", u.username AS "ownerName",
   a.name, a.client_id AS "clientId", a.redirect_uris AS "redirectUris", a.scopes, a.homepage, a.status,
   a.created_at AS "createdAt", a.logo_updated_at AS "logoUpdatedAt"`;
 
