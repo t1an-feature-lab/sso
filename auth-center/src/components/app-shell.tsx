@@ -118,7 +118,7 @@ export function ConsoleShell({ user, admin = false, children }: { user: PublicUs
             <StackItem as="span" size="fill">
               <VStack as="span" gap={0.5} hAlign="stretch">
                 <Text type="label" maxLines={1}>{user.username}</Text>
-                <Text type="supporting" maxLines={1}>{user.phone ?? role}</Text>
+                <Text type="supporting" maxLines={1}>{role}</Text>
               </VStack>
             </StackItem>
             <Icon icon="chevronDown" size="sm" />

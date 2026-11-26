@@ -1,71 +1,73 @@
 import "server-only";
-import { QueryTypes } from "sequelize";
+import type { Prisma } from "@/generated/prisma/client";
 import { applicationIdenticon } from "@/common/application-identicon";
-import type { AuthorizedApplicationUser, ClientApplication, ClientApplicationDetail, ClientSecret, PublicUser } from "@/common/types";
+import type { ClientApplication, ClientApplicationDetail, PublicUser } from "@/common/types";
 import { requireAdmin, requireUser } from "../auth";
 import { db } from "../db";
 
-type ApplicationRow = Omit<ClientApplication, "createdAt" | "logoUrl"> & {
-  createdAt: Date;
-  logoUpdatedAt: Date | null;
-};
+const applicationSelect = {
+  id: true, ownerId: true, owner: { select: { username: true } }, name: true, clientId: true,
+  redirectUris: true, scopes: true, homepage: true, status: true, createdAt: true, logoUpdatedAt: true,
+} satisfies Prisma.ApplicationSelect;
 
-const applicationColumns = `a.id, a.owner_id AS "ownerId", u.username AS "ownerName",
-  a.name, a.client_id AS "clientId", a.redirect_uris AS "redirectUris", a.scopes, a.homepage, a.status,
-  a.created_at AS "createdAt", a.logo_updated_at AS "logoUpdatedAt"`;
-
-function serializeApplication(row: ApplicationRow): ClientApplication {
-  const { logoUpdatedAt, ...application } = row;
+function serializeApplication(row: Prisma.ApplicationGetPayload<{ select: typeof applicationSelect }>): ClientApplication {
+  const { owner, logoUpdatedAt, ...application } = row;
   return {
     ...application,
+    ownerName: owner.username,
     createdAt: application.createdAt.toISOString(),
     logoUrl: logoUpdatedAt ? `/api/applications/${application.id}/logo?v=${logoUpdatedAt.getTime()}` : applicationIdenticon(application.id),
   };
 }
 
 export async function getApplications(user: PublicUser, scope: "own" | "all" = "own"): Promise<ClientApplication[]> {
-  // Re-read the session so callers cannot turn a supplied role into authorization.
   const currentUser = await requireUser();
   if (currentUser.id !== user.id) throw new Error("无权查看此账户的应用");
-  const applications = await db.query<ApplicationRow>(`
-    SELECT ${applicationColumns}
-    FROM sso_client_applications a JOIN sso_users u ON u.id = a.owner_id
-    ${scope === "all" && currentUser.role === "admin" ? "" : "WHERE a.owner_id = :userId"}
-    ORDER BY a.created_at DESC
-  `, { replacements: { userId: currentUser.id }, type: QueryTypes.SELECT });
+  const applications = await db.application.findMany({
+    where: scope === "all" && currentUser.role === "admin" ? {} : { ownerId: currentUser.id },
+    select: applicationSelect,
+    orderBy: { createdAt: "desc" },
+  });
   return applications.map(serializeApplication);
 }
 
 export async function getApplication(id: string, scope: "own" | "all" = "own"): Promise<ClientApplicationDetail | null> {
   const user = scope === "all" ? await requireAdmin() : await requireUser();
   if (!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(id)) return null;
-  const [application] = await db.query<ApplicationRow>(`
-    SELECT ${applicationColumns}
-    FROM sso_client_applications a JOIN sso_users u ON u.id = a.owner_id
-    WHERE a.id = :id ${scope === "all" ? "" : "AND a.owner_id = :userId"}
-  `, { replacements: { id, userId: user.id }, type: QueryTypes.SELECT });
+  const application = await db.application.findFirst({
+    where: { id, ...(scope === "all" ? {} : { ownerId: user.id }) },
+    select: {
+      ...applicationSelect,
+      clientSecrets: {
+        select: { id: true, lastFour: true, createdAt: true, lastUsedAt: true, creator: { select: { username: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      },
+      authorizations: {
+        select: {
+          id: true, userId: true, scopes: true, authorizedAt: true, lastUsedAt: true,
+          user: { select: { username: true, phone: true } },
+        },
+        orderBy: [{ authorizedAt: "desc" }, { id: "asc" }],
+      },
+    },
+  });
   if (!application) return null;
-  const [clientSecrets, authorizedUsers] = await Promise.all([
-    db.query<Omit<ClientSecret, "createdAt" | "lastUsedAt"> & { createdAt: Date; lastUsedAt: Date | null }>(`
-      SELECT s.id, s.last_four AS "lastFour", (s.secret_encrypted IS NOT NULL) AS "canReveal",
-        s.created_at AS "createdAt", COALESCE(u.username, '已删除用户') AS "createdBy", s.last_used_at AS "lastUsedAt"
-      FROM sso_client_secrets s LEFT JOIN sso_users u ON u.id = s.created_by
-      WHERE s.application_id = :id ORDER BY s.created_at DESC, s.id
-    `, { replacements: { id }, type: QueryTypes.SELECT }),
-    db.query<Omit<AuthorizedApplicationUser, "authorizedAt" | "lastUsedAt"> & { authorizedAt: Date; lastUsedAt: Date | null }>(`
-      SELECT a.id, u.id AS "userId", u.username, u.phone, a.scopes,
-        a.authorized_at AS "authorizedAt", a.last_used_at AS "lastUsedAt"
-      FROM sso_client_authorizations a JOIN sso_users u ON u.id = a.user_id
-      WHERE a.application_id = :id ORDER BY a.authorized_at DESC, a.id
-    `, { replacements: { id }, type: QueryTypes.SELECT }),
-  ]);
+  const { clientSecrets, authorizations, ...row } = application;
   return {
-    ...serializeApplication(application),
-    clientSecrets: clientSecrets.map((secret) => ({
-      ...secret, createdAt: secret.createdAt.toISOString(), lastUsedAt: secret.lastUsedAt?.toISOString() ?? null,
+    ...serializeApplication(row),
+    clientSecrets: clientSecrets.map(({ creator, ...secret }) => ({
+      ...secret,
+      canReveal: true,
+      createdBy: creator?.username ?? "已删除用户",
+      createdAt: secret.createdAt.toISOString(),
+      lastUsedAt: secret.lastUsedAt?.toISOString() ?? null,
     })),
-    authorizedUsers: authorizedUsers.map((authorization) => ({
-      ...authorization, authorizedAt: authorization.authorizedAt.toISOString(), lastUsedAt: authorization.lastUsedAt?.toISOString() ?? null,
+    authorizedUsers: authorizations.map(({ user, ...authorization }) => ({
+      ...authorization,
+      username: user.username,
+      phone: user.phone,
+      authorizedAt: authorization.authorizedAt.toISOString(),
+      lastUsedAt: authorization.lastUsedAt?.toISOString() ?? null,
     })),
   };
 }

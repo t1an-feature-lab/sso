@@ -1,8 +1,8 @@
 import { PageHeading } from '@/components/page-heading';
 import { InternalApps } from '@/components/internal-apps';
-import { getInternalApplications } from '@/server/queries';
+import { requireAdmin } from '@/server/auth';
 
 export default async function InternalAppsPage() {
-  const applications = await getInternalApplications();
-  return <><PageHeading title="内部子应用" /><InternalApps applications={applications} /></>;
+  await requireAdmin();
+  return <><PageHeading title="内部子应用" /><InternalApps /></>;
 }

@@ -2,35 +2,45 @@
   "name": "auth-center",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "generateKey": "node ./scripts/jwks.js"
+    "generateKey": "node ./scripts/jwks.js",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.16",
     "@astryxdesign/theme-neutral": "0.7.16",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
     "@stylexjs/stylex": "0.19.2",
     "next": "16.4.6",
     "pg": "8.23.1",
-    "pg-hstore": "2.3.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "sequelize": "^6.37.8",
     "server-only": "0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",
     "@types/node": "^20",
+    "@types/pg": "^8",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "dotenv": "^17",
+    "prisma": "7.10.1",
     "tailwindcss": "4.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsx": "^4"
   },
   "packageManager": "pnpm@10.33.2"
 }

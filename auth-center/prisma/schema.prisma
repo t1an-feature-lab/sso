@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  user
+
+  @@map("user_role")
+}
+
+enum ApplicationStatus {
+  active
+  disabled
+
+  @@map("application_status")
+}
+
+enum TokenType {
+  access
+  refresh
+
+  @@map("token_type")
+}
+
+model User {
+  id              String                         @id @default(uuid()) @db.Uuid
+  loginAccount    String                         @unique @map("login_account") @db.VarChar(64)
+  username        String                         @unique @db.VarChar(64)
+  phone           String?                        @unique @db.VarChar(20)
+  passwordHash    String                         @map("password_hash")
+  role            UserRole                       @default(user)
+  avatarData      Bytes?                         @map("avatar_data")
+  avatarMime      String?                        @map("avatar_mime")
+  avatarUpdatedAt DateTime?                      @map("avatar_updated_at") @db.Timestamptz(3)
+  createdAt       DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
+  sessions        Session[]
+  applications    Application[]
+  createdSecrets  ClientSecret[]
+  authorizations  UserApplicationAuthorization[]
+
+  @@map("users")
+}
+
+model Session {
+  tokenHash String   @id @map("token_hash") @db.Char(64)
+  userId    String   @map("user_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Application {
+  id             String                         @id @default(uuid()) @db.Uuid
+  ownerId        String                         @map("owner_id") @db.Uuid
+  name           String                         @db.VarChar(80)
+  clientId       String                         @unique @map("client_id")
+  redirectUris   String[]                       @map("redirect_uris")
+  scopes         String[]                       @default(["openid", "profile", "email"])
+  homepage       String
+  status         ApplicationStatus              @default(active)
+  logoData       Bytes?                         @map("logo_data")
+  logoMime       String?                        @map("logo_mime")
+  logoUpdatedAt  DateTime?                      @map("logo_updated_at") @db.Timestamptz(3)
+  createdAt      DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
+  owner          User                           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clientSecrets  ClientSecret[]
+  authorizations UserApplicationAuthorization[]
+
+  @@index([ownerId])
+  @@map("applications")
+}
+
+model ClientSecret {
+  id              String      @id @default(uuid()) @db.Uuid
+  applicationId   String      @map("application_id") @db.Uuid
+  secretHash      String      @map("secret_hash") @db.Char(64)
+  secretEncrypted String      @map("secret_encrypted")
+  lastFour        String      @map("last_four") @db.VarChar(4)
+  createdBy       String?     @map("created_by") @db.Uuid
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt      DateTime?   @map("last_used_at") @db.Timestamptz(3)
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  creator         User?       @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([applicationId, secretHash])
+  @@index([createdBy])
+  @@map("client_secrets")
+}
+
+model UserApplicationAuthorization {
+  id            String             @id @default(uuid()) @db.Uuid
+  applicationId String             @map("application_id") @db.Uuid
+  userId        String             @map("user_id") @db.Uuid
+  scopes        String[]
+  authorizedAt  DateTime           @default(now()) @map("authorized_at") @db.Timestamptz(3)
+  lastUsedAt    DateTime?          @map("last_used_at") @db.Timestamptz(3)
+  application   Application        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens        ApplicationToken[]
+
+  @@unique([applicationId, userId])
+  @@index([userId])
+  @@map("user_application_authorizations")
+}
+
+model ApplicationToken {
+  id              String                       @id @default(uuid()) @db.Uuid
+  authorizationId String                       @map("authorization_id") @db.Uuid
+  tokenHash       String                       @unique @map("token_hash") @db.Char(64)
+  type            TokenType
+  createdAt       DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt       DateTime                     @map("expires_at") @db.Timestamptz(3)
+  authorization   UserApplicationAuthorization @relation(fields: [authorizationId], references: [id], onDelete: Cascade)
+
+  @@index([authorizationId])
+  @@map("application_tokens")
+}

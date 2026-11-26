@@ -3,13 +3,12 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { QueryTypes, UniqueConstraintError, type Transaction } from "sequelize";
+import { Prisma } from "@/generated/prisma/client";
 import type { ActionState, PublicUser } from "@/common/types";
 import { createSession, deleteSession, getCurrentSessionHash, requireUser } from "./auth";
-import { db } from "./db";
+import { db, serializableTransaction } from "./db";
 import { readLogo } from "./logo";
 import { hashPassword, verifyPassword } from "./password";
-import { ensureStore } from "./store";
 
 const value = (formData: FormData, name: string) => {
   const entry = formData.get(name);
@@ -28,48 +27,35 @@ export async function loginAction(_previous: ActionState, formData: FormData): P
 
   let user: { id: string; role: PublicUser["role"]; passwordHash: string };
   try {
-    await ensureStore();
-    const [attempt] = await db.query<{ failures: number }>(`
-      INSERT INTO sso_login_attempts (account, failures) VALUES (:account, 1)
-      ON CONFLICT (account) DO UPDATE SET
-        failures = CASE WHEN sso_login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
-          THEN 1 ELSE sso_login_attempts.failures + 1 END,
-        window_started_at = CASE WHEN sso_login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
-          THEN NOW() ELSE sso_login_attempts.window_started_at END
-      RETURNING failures
-    `, { replacements: { account }, type: QueryTypes.SELECT });
-    if (attempt.failures > 8) return { error: "尝试次数过多，请在 15 分钟后重试" };
-
-    const findUser = () => db.query<typeof user>(`
-      SELECT id, role, password_hash AS "passwordHash" FROM sso_users WHERE login_account = :account
-    `, { replacements: { account }, type: QueryTypes.SELECT });
-    let [existing] = await findUser();
+    const findUser = () => db.user.findUnique({
+      where: { loginAccount: account },
+      select: { id: true, role: true, passwordHash: true },
+    });
+    let existing = await findUser();
     if (!existing) {
+      if (account === "admin") return { error: "管理员账号尚未初始化，请先初始化数据库" };
       if (password.length < 6) {
         return { error: "请检查输入内容", fieldErrors: { password: "新账户密码至少为 6 位" } };
       }
       const id = randomUUID();
       const passwordHash = await hashPassword(password);
-      await db.query(`
-        INSERT INTO sso_users (id, login_account, username, phone, password_hash, role)
-        VALUES (:id, :account, :account, :account, :passwordHash, 'user')
-        ON CONFLICT DO NOTHING
-      `, { replacements: { id, account, passwordHash } });
-      [existing] = await findUser();
+      await db.user.createMany({
+        data: [{ id, loginAccount: account, username: account, phone: account, passwordHash, role: "user" }],
+        skipDuplicates: true,
+      });
+      existing = await findUser();
       if (!existing) {
-        await db.query(`
-          INSERT INTO sso_users (id, login_account, username, phone, password_hash, role)
-          VALUES (:id, :account, :username, :account, :passwordHash, 'user')
-          ON CONFLICT (login_account) DO NOTHING
-        `, { replacements: { id, account, username: `${account}-${id}`, passwordHash } });
-        [existing] = await findUser();
+        await db.user.createMany({
+          data: [{ id, loginAccount: account, username: `${account}-${id}`, phone: account, passwordHash, role: "user" }],
+          skipDuplicates: true,
+        });
+        existing = await findUser();
       }
     }
     if (!existing || !(await verifyPassword(password, existing.passwordHash))) {
       return { error: "账号或密码错误", fieldErrors: { password: "账号或密码错误" } };
     }
     user = existing;
-    await db.query("DELETE FROM sso_login_attempts WHERE account = :account", { replacements: { account } });
     await createSession(user.id);
   } catch (error) {
     console.error("SSO login failed", error instanceof Error ? error.name : "UnknownError");
@@ -105,14 +91,18 @@ export async function updateProfileAction(formData: FormData): Promise<ActionSta
     if (avatar && "error" in avatar) fieldErrors.avatar = avatar.error;
     if (Object.keys(fieldErrors).length) return { fieldErrors };
     const image = avatar && "data" in avatar ? avatar : null;
-    const rows = await db.query<{ id: string }>(`
-      UPDATE sso_users SET username = :username
-        ${image ? ", avatar_data = :data, avatar_mime = :mime, avatar_updated_at = NOW()" : ""}
-      WHERE id = :id RETURNING id
-    `, { replacements: { id: user.id, username, data: image?.data ?? null, mime: image?.mime ?? null }, type: QueryTypes.SELECT });
-    if (!rows.length) return { error: "账户不存在，请重新登录" };
+    const updated = await db.user.updateMany({
+      where: { id: user.id },
+      data: {
+        username,
+        ...(image ? { avatarData: new Uint8Array(image.data), avatarMime: image.mime, avatarUpdatedAt: new Date() } : {}),
+      },
+    });
+    if (!updated.count) return { error: "账户不存在，请重新登录" };
   } catch (error) {
-    if (error instanceof UniqueConstraintError) return { fieldErrors: { username: "该用户名已被使用" } };
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { fieldErrors: { username: "该用户名已被使用" } };
+    }
     console.error("SSO profile update failed", error instanceof Error ? error.name : "UnknownError");
     return { error: "个人信息保存失败，请稍后重试" };
   }
@@ -130,13 +120,16 @@ export async function updateUserRoleAction(_previous: ActionState, formData: For
   if (role !== "admin" && role !== "user") return { error: "请选择有效的用户角色" };
 
   try {
-    const rows = await db.query<{ id: string }>(`
-      UPDATE sso_users AS target SET role = :role
-      WHERE target.id = :id AND target.id <> :actorId AND target.login_account <> 'admin'
-        AND EXISTS (SELECT 1 FROM sso_users AS actor WHERE actor.id = :actorId AND actor.role = 'admin')
-      RETURNING target.id
-    `, { replacements: { id, role, actorId: user.id }, type: QueryTypes.SELECT });
-    if (!rows.length) return { error: "用户不存在或无权修改" };
+    const updated = await serializableTransaction(async (transaction) => {
+      const actor = await transaction.user.findFirst({ where: { id: user.id, role: "admin" }, select: { id: true } });
+      if (!actor) return false;
+      const result = await transaction.user.updateMany({
+        where: { id, NOT: { id: user.id }, loginAccount: { not: "admin" } },
+        data: { role },
+      });
+      return result.count > 0;
+    });
+    if (!updated) return { error: "用户不存在或无权修改" };
   } catch (error) {
     console.error("SSO user role update failed", error instanceof Error ? error.name : "UnknownError");
     return { error: "权限修改失败，请稍后重试" };
@@ -145,11 +138,10 @@ export async function updateUserRoleAction(_previous: ActionState, formData: For
   return { success: "用户权限已更新", id };
 }
 
-async function revokeOtherSessions(id: string, sessionHash: string | null, transaction: Transaction) {
-  await db.query(`
-    DELETE FROM sso_sessions WHERE user_id = :id
-      AND (:sessionHash IS NULL OR token_hash <> :sessionHash)
-  `, { replacements: { id, sessionHash }, transaction });
+async function revokeOtherSessions(id: string, sessionHash: string | null, transaction: Prisma.TransactionClient) {
+  await transaction.session.deleteMany({
+    where: { userId: id, ...(sessionHash ? { tokenHash: { not: sessionHash } } : {}) },
+  });
 }
 
 export async function resetUserPasswordAction(_previous: ActionState, formData: FormData): Promise<ActionState> {
@@ -170,14 +162,13 @@ async function resetPassword(user: PublicUser, id: string): Promise<ActionState>
     const password = "user12345";
     const passwordHash = await hashPassword(password);
     const sessionHash = await getCurrentSessionHash();
-    const updated = await db.transaction(async (transaction) => {
-      const rows = await db.query<{ id: string }>(`
-        UPDATE sso_users AS target SET password_hash = :passwordHash
-        WHERE target.id = :id
-          AND (target.id = :actorId OR EXISTS (SELECT 1 FROM sso_users AS actor WHERE actor.id = :actorId AND actor.role = 'admin'))
-        RETURNING target.id
-      `, { replacements: { id, passwordHash, actorId: user.id }, type: QueryTypes.SELECT, transaction });
-      if (!rows.length) return false;
+    const updated = await serializableTransaction(async (transaction) => {
+      if (id !== user.id) {
+        const actor = await transaction.user.findFirst({ where: { id: user.id, role: "admin" }, select: { id: true } });
+        if (!actor) return false;
+      }
+      const result = await transaction.user.updateMany({ where: { id }, data: { passwordHash } });
+      if (!result.count) return false;
       await revokeOtherSessions(id, sessionHash, transaction);
       return true;
     });
@@ -207,18 +198,14 @@ export async function changePasswordAction(formData: FormData): Promise<ActionSt
 
   try {
     const sessionHash = await getCurrentSessionHash();
-    const result = await db.transaction(async (transaction): Promise<ActionState> => {
-      const [account] = await db.query<{ passwordHash: string }>(`
-        SELECT password_hash AS "passwordHash" FROM sso_users WHERE id = :id FOR UPDATE
-      `, { replacements: { id: user.id }, type: QueryTypes.SELECT, transaction });
+    const result = await serializableTransaction(async (transaction): Promise<ActionState> => {
+      const account = await transaction.user.findUnique({ where: { id: user.id }, select: { passwordHash: true } });
       if (!account) return { error: "账户不存在，请重新登录" };
       if (!(await verifyPassword(currentPassword, account.passwordHash))) {
         return { fieldErrors: { currentPassword: "当前密码不正确" } };
       }
       const passwordHash = await hashPassword(newPassword);
-      await db.query("UPDATE sso_users SET password_hash = :passwordHash WHERE id = :id", {
-        replacements: { id: user.id, passwordHash }, transaction,
-      });
+      await transaction.user.update({ where: { id: user.id }, data: { passwordHash } });
       await revokeOtherSessions(user.id, sessionHash, transaction);
       return { success: "密码已更改" };
     });
@@ -237,13 +224,15 @@ export async function deleteUserAction(_previous: ActionState, formData: FormDat
   if (!uuid.test(id)) return { error: "用户不存在" };
   if (id === user.id.toLowerCase()) return { error: "不能删除当前登录用户" };
   try {
-    const rows = await db.query<{ id: string }>(`
-      DELETE FROM sso_users AS target
-      WHERE target.id = :id AND target.id <> :actorId AND target.login_account <> 'admin'
-        AND EXISTS (SELECT 1 FROM sso_users AS actor WHERE actor.id = :actorId AND actor.role = 'admin')
-      RETURNING target.id
-    `, { replacements: { id, actorId: user.id }, type: QueryTypes.SELECT });
-    if (!rows.length) return { error: "用户不存在或无权删除" };
+    const deleted = await serializableTransaction(async (transaction) => {
+      const actor = await transaction.user.findFirst({ where: { id: user.id, role: "admin" }, select: { id: true } });
+      if (!actor) return false;
+      const result = await transaction.user.deleteMany({
+        where: { id, NOT: { id: user.id }, loginAccount: { not: "admin" } },
+      });
+      return result.count > 0;
+    });
+    if (!deleted) return { error: "用户不存在或无权删除" };
   } catch (error) {
     console.error("SSO user deletion failed", error instanceof Error ? error.name : "UnknownError");
     return { error: "用户删除失败，请稍后重试" };

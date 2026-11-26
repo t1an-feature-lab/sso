@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { QueryTypes } from "sequelize";
 import { getCurrentUser } from "@/server/auth";
 import { db } from "@/server/db";
 import { decryptClientSecret } from "@/server/secret-cipher";
@@ -23,17 +22,15 @@ export async function POST(
   if (!uuid.test(id) || !uuid.test(secretId)) {
     return NextResponse.json({ error: "密钥不存在" }, { status: 404, headers });
   }
-  const [row] = await db.query<{ secretEncrypted: string | null }>(`
-    SELECT s.secret_encrypted AS "secretEncrypted"
-    FROM sso_client_secrets s
-    JOIN sso_client_applications a ON a.id = s.application_id
-    WHERE s.id = :secretId AND a.id = :id ${user.role === "admin" ? "" : "AND a.owner_id = :ownerId"}
-  `, { replacements: { id, secretId, ownerId: user.id }, type: QueryTypes.SELECT });
+  const row = await db.clientSecret.findFirst({
+    where: {
+      id: secretId, applicationId: id,
+      ...(user.role === "admin" ? {} : { application: { ownerId: user.id } }),
+    },
+    select: { secretEncrypted: true },
+  });
   if (!row) {
     return NextResponse.json({ error: "密钥不存在或无权查看" }, { status: 404, headers });
-  }
-  if (!row.secretEncrypted) {
-    return NextResponse.json({ error: "旧密钥未保存明文，请生成新密钥" }, { status: 409, headers });
   }
   const clientSecret = decryptClientSecret(row.secretEncrypted);
   if (!clientSecret) {

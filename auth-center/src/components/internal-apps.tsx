@@ -1,27 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
 import { Card } from '@astryxdesign/core/Card';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Icon } from '@astryxdesign/core/Icon';
 import { Selector } from '@astryxdesign/core/Selector';
 import { HStack, VStack } from '@astryxdesign/core/Stack';
-import { Table, proportional, pixel } from '@astryxdesign/core/Table';
-import { Text } from '@astryxdesign/core/Text';
+import { Table } from '@astryxdesign/core/Table';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import type { InternalApplication } from '@/common/types';
 import { TablePager, useTablePage } from '@/components/table-pagination';
 
-export function InternalApps({ applications }: { applications: InternalApplication[] }) {
+export function InternalApps() {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
   const hasFilters = Boolean(query.trim()) || status !== 'all';
-  const filtered = applications.filter((app) =>
-    (status === 'all' || app.status === status) && app.name.toLowerCase().includes(query.trim().toLowerCase()),
-  );
-  const pagination = useTablePage(filtered);
+  const pagination = useTablePage([]);
 
   function changeQuery(value: string) {
     setQuery(value);
@@ -51,11 +45,11 @@ export function InternalApps({ applications }: { applications: InternalApplicati
         ]} width={130} />
       </HStack>
       <Card padding={0}>
-        <Table aria-label="内部子应用" data={pagination.data} rowIndexStart={pagination.rowIndexStart} rowCount={filtered.length} idKey="id" density="balanced" textOverflow="truncate" hasHover emptyState={<EmptyState title={hasFilters ? '没有匹配的子应用' : '暂无内部子应用'} icon={<Icon icon="wrench" size="lg" />} actions={hasFilters ? <Button label="清空筛选" onClick={clearFilters} /> : undefined} />} columns={[
-          { key: 'name', header: '应用名称', width: proportional(1, { minWidth: 180 }), renderCell: (app) => <Text type="label" maxLines={1} style={{ minInlineSize: 0, maxInlineSize: "15rem" }}>{app.name}</Text> },
-          { key: 'homepage', header: '应用地址', width: proportional(2, { minWidth: 200 }), renderCell: (app) => <Text color="secondary" maxLines={1} style={{ minInlineSize: 0, maxInlineSize: "20rem" }}>{app.homepage || '—'}</Text> },
-          { key: 'status', header: '状态', width: pixel(100), renderCell: (app) => <Badge label={app.status === 'active' ? '启用' : '停用'} variant={app.status === 'active' ? 'success' : 'neutral'} /> },
-          { key: 'actions', header: '操作', width: pixel(110), align: 'end', renderCell: (app) => <Button label="查看详情" variant="ghost" size="sm" href={`/admin/internal-apps/${app.id}`} /> },
+        <Table aria-label="内部子应用" data={pagination.data} rowIndexStart={pagination.rowIndexStart} rowCount={0} idKey="id" density="balanced" textOverflow="truncate" hasHover emptyState={<EmptyState title={hasFilters ? '没有匹配的子应用' : '暂无内部子应用'} icon={<Icon icon="wrench" size="lg" />} actions={hasFilters ? <Button label="清空筛选" onClick={clearFilters} /> : undefined} />} columns={[
+          { key: 'name', header: '应用名称' },
+          { key: 'homepage', header: '应用地址' },
+          { key: 'status', header: '状态' },
+          { key: 'actions', header: '操作', align: 'end' },
         ]} />
       </Card>
       <TablePager {...pagination.controls} label="内部子应用分页" />

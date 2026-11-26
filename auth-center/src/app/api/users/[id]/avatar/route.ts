@@ -1,4 +1,3 @@
-import { QueryTypes } from "sequelize";
 import { getCurrentUser } from "@/server/auth";
 import { db } from "@/server/db";
 
@@ -12,15 +11,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(id) || (user.role !== "admin" && id !== user.id)) {
     return new Response(null, { status: 404, headers: { "Cache-Control": "private, no-store" } });
   }
-  const [avatar] = await db.query<{ data: Buffer | null; mime: string | null }>(`
-    SELECT avatar_data AS data, avatar_mime AS mime FROM sso_users WHERE id = :id
-  `, { replacements: { id }, type: QueryTypes.SELECT });
-  if (!avatar?.data || !avatar.mime || !["image/png", "image/jpeg", "image/webp"].includes(avatar.mime)) {
+  const avatar = await db.user.findUnique({ where: { id }, select: { avatarData: true, avatarMime: true } });
+  if (!avatar?.avatarData || !avatar.avatarMime || !["image/png", "image/jpeg", "image/webp"].includes(avatar.avatarMime)) {
     return new Response(null, { status: 404, headers: { "Cache-Control": "private, no-store" } });
   }
-  return new Response(new Uint8Array(avatar.data), { headers: {
-    "Content-Type": avatar.mime,
-    "Content-Length": String(avatar.data.length),
+  return new Response(new Uint8Array(avatar.avatarData), { headers: {
+    "Content-Type": avatar.avatarMime,
+    "Content-Length": String(avatar.avatarData.length),
     "Cache-Control": "private, no-store",
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'",

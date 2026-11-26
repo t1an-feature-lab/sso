@@ -49,14 +49,6 @@ export type ClientApplicationDetail = ClientApplication & {
   authorizedUsers: AuthorizedApplicationUser[];
 };
 
-export type InternalApplication = {
-  id: string;
-  name: string;
-  homepage: string;
-  status: "active" | "disabled";
-  createdAt: string;
-};
-
 export type ActionState = {
   success?: string;
   error?: string;
