@@ -17,6 +17,7 @@ function Toaster({ ...props }: ToasterProps) {
     <Sonner
       theme={resolved}
       position="top-center"
+      richColors
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" aria-hidden="true" />,
@@ -37,10 +38,9 @@ function Toaster({ ...props }: ToasterProps) {
       }
       toastOptions={{
         classNames: {
-          toast:
-            "rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 text-xs",
+          toast: "rounded-lg shadow-md text-xs",
           title: "font-medium",
-          description: "text-muted-foreground",
+          description: "opacity-90",
         },
       }}
       {...props}

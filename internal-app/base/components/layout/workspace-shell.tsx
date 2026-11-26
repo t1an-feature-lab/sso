@@ -18,7 +18,6 @@ import {
   type RefObject,
 } from "react";
 import { UserAccountMenu } from "@/components/auth/user-account-menu";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PublicUser } from "@/lib/auth/types";
@@ -72,13 +71,11 @@ function getHeaderMeta(pathname: string): {
 
 interface WorkspaceShellProps {
   user: PublicUser;
-  storageMode: "postgres" | "memory";
   children: ReactNode;
 }
 
 export function WorkspaceShell({
   user,
-  storageMode,
   children,
 }: WorkspaceShellProps) {
   const pathname = usePathname();
@@ -111,16 +108,10 @@ export function WorkspaceShell({
             <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
               <DatabaseIcon className="size-4" aria-hidden="true" />
             </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 items-center">
               <span className="bitable-cell-truncate text-sm font-medium">
                 Base Studio
               </span>
-              <Badge
-                variant="secondary"
-                className="h-4 px-1.5 text-[10px] font-normal"
-              >
-                {storageMode === "postgres" ? "PG" : "内存"}
-              </Badge>
             </div>
           </div>
 

@@ -326,13 +326,9 @@ export function UsersPermissionView({
 
         <nav
           aria-label="用户分页"
-          className="flex flex-wrap items-center justify-between gap-3 px-1 text-sm text-muted-foreground"
+          className="flex items-center justify-end gap-1 px-1 text-sm text-muted-foreground"
         >
-          <span className="tabular-nums">
-            第 {pageData.page} / {pageData.totalPages} 页，共 {pageData.total} 条
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
+          <Button
               variant="outline"
               size="sm"
               disabled={loadingPage || pageData.page <= 1}
@@ -380,7 +376,6 @@ export function UsersPermissionView({
               下一页
               <ChevronRightIcon className="size-4" aria-hidden="true" />
             </Button>
-          </div>
         </nav>
       </div>
   );
