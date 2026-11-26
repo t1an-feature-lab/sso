@@ -13,6 +13,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { edgeCompSlot } from "@astryxdesign/core/Layout";
 import { StackItem } from "@astryxdesign/core/Stack";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useAppToast } from "@/components/app-toast";
 import { VStack } from "@astryxdesign/core/VStack";
@@ -51,7 +52,7 @@ export function ApplicationForm({
   const [pending, setPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [tab, setTab] = useUrlTab("tab", ["configuration", "authorizations"], "configuration");
+  const [tab, setTab] = useUrlTab("tab", ["configuration", "authorizations", "delete"], "configuration");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const panelId = useId();
   const submissionPending = useRef(false);
@@ -227,6 +228,7 @@ export function ApplicationForm({
           <TabList value={tab} onChange={setTab} aria-label="应用详情" role="tablist" hasDivider isFullBleed>
             <Tab value="configuration" label="应用配置" panelId={`${panelId}-configuration`} />
             <Tab value="authorizations" label="授权用户" panelId={`${panelId}-authorizations`} />
+            <Tab value="delete" label="删除应用" panelId={`${panelId}-delete`} />
           </TabList>
           <div id={`${panelId}-configuration`} role="tabpanel" aria-label="应用配置" hidden={tab !== "configuration"} tabIndex={0}>
             {configuration}
@@ -234,11 +236,19 @@ export function ApplicationForm({
           <div id={`${panelId}-authorizations`} role="tabpanel" aria-label="授权用户" hidden={tab !== "authorizations"} tabIndex={0}>
             <ApplicationAuthorizations application={application} admin={admin} />
           </div>
+          <div id={`${panelId}-delete`} role="tabpanel" aria-label="删除应用" hidden={tab !== "delete"} tabIndex={0}>
+            <VStack gap={6}>
+              <VStack gap={4}>
+                <Heading level={3} accessibilityLevel={2}>删除应用</Heading>
+                <Text color="secondary">删除后无法恢复，相关配置、密钥和用户授权会一并移除</Text>
+              </VStack>
+              <HStack>
+                <Button label="删除应用" variant="destructive" onClick={() => setConfirmDelete(true)} isDisabled={pending || deleting} />
+              </HStack>
+            </VStack>
+          </div>
         </>
       ) : configuration}
-      {application && <HStack hAlign="end">
-        <Button label="删除应用" variant="destructive" onClick={() => setConfirmDelete(true)} isDisabled={pending || deleting} />
-      </HStack>}
       <AlertDialog
         isOpen={confirmDelete}
         onOpenChange={(open) => { if (!deleting) setConfirmDelete(open); }}

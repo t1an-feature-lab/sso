@@ -15,9 +15,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const mode = preference === "light" || preference === "dark" ? preference : "system";
 
   return (
-    <html lang="zh-CN" data-theme={mode === "system" ? undefined : mode}>
+    <html lang="zh-CN" data-theme={mode === "system" ? undefined : mode} style={{ height: "100%", overflow: "hidden" }}>
       <head><meta name="color-scheme" content={mode === "system" ? "light dark" : mode} /></head>
-      <body>
+      <body style={{ height: "100%", margin: 0, overflowY: "auto", scrollbarGutter: "stable" }}>
         <Providers initialMode={mode}>{children}</Providers>
       </body>
     </html>

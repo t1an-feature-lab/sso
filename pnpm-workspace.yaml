@@ -1,6 +1,7 @@
 packages:
   - auth-center
   - internal-app
+  - internal-app/*
   - external-app
 
 ignoredBuiltDependencies:
