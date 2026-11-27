@@ -1,5 +1,6 @@
 import "server-only";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { PrismaClient } from "@/generated/prisma/client";
 import {
   BUILT_IN_ADMIN_INITIAL_PASSWORD,
@@ -7,44 +8,83 @@ import {
 } from "@/lib/types";
 import { hashPassword } from "./password";
 
-const PRISMA_CLIENT_SCHEMA_VERSION = "2026-11-27-model-provider-icon";
+const PRISMA_CLIENT_SCHEMA_VERSION = "2026-11-27-chat-parts";
 
 const globalForDb = globalThis as typeof globalThis & {
+  agentBuilderPool?: Pool;
   agentBuilderPrisma?: PrismaClient;
+  agentBuilderPrismaPool?: Pool;
   agentBuilderPrismaVersion?: string;
   agentBuilderAdminReady?: Promise<void>;
 };
 
-function createPrismaClient(): PrismaClient {
+function databaseUrl(): string {
+  return (
+    process.env.DATABASE_URL ??
+    "postgresql://postgres:postgres@127.0.0.1:5432/agent_builder"
+  );
+}
+
+function getPool(): Pool {
+  const current = globalForDb.agentBuilderPool;
+  if (current && !current.ending && !current.ended) return current;
+  const pool = new Pool({ connectionString: databaseUrl() });
+  pool.on("error", () => undefined);
+  globalForDb.agentBuilderPool = pool;
+  return pool;
+}
+
+function createPrismaClient(pool: Pool): PrismaClient {
   return new PrismaClient({
-    adapter: new PrismaPg({
-      connectionString:
-        process.env.DATABASE_URL ??
-        "postgresql://postgres:postgres@127.0.0.1:5432/agent_builder",
-    }),
+    adapter: new PrismaPg(pool),
   });
 }
 
 function getOrCreateDb(): PrismaClient {
+  const pool = getPool();
   const cached = globalForDb.agentBuilderPrisma;
   if (
     cached instanceof PrismaClient &&
+    globalForDb.agentBuilderPrismaPool === pool &&
     globalForDb.agentBuilderPrismaVersion === PRISMA_CLIENT_SCHEMA_VERSION &&
     typeof (cached as Partial<PrismaClient>).modelConfig?.findMany ===
       "function"
   ) {
     return cached;
   }
-  if (cached) {
-    void cached.$disconnect().catch(() => undefined);
-  }
-  const next = createPrismaClient();
+  const next = createPrismaClient(pool);
   globalForDb.agentBuilderPrisma = next;
+  globalForDb.agentBuilderPrismaPool = pool;
   globalForDb.agentBuilderPrismaVersion = PRISMA_CLIENT_SCHEMA_VERSION;
   return next;
 }
 
-export const db = getOrCreateDb();
+export function resetDatabaseClient(): void {
+  globalForDb.agentBuilderPool = undefined;
+  globalForDb.agentBuilderPrisma = undefined;
+  globalForDb.agentBuilderPrismaPool = undefined;
+  globalForDb.agentBuilderPrismaVersion = undefined;
+  globalForDb.agentBuilderAdminReady = undefined;
+}
+
+export function isDatabaseUnreachable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return (
+    message.includes("Can't reach database server") ||
+    message.includes("ECONNREFUSED") ||
+    message.includes("Connection terminated") ||
+    message.includes("Connection closed") ||
+    message.includes("Cannot use a pool after calling end on the pool")
+  );
+}
+
+export const db: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = getOrCreateDb();
+    const value = Reflect.get(client, property, client);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
 
 export function ensureBuiltInAdmin(): Promise<void> {
   if (!globalForDb.agentBuilderAdminReady) {
@@ -77,7 +117,8 @@ export function ensureBuiltInAdmin(): Promise<void> {
         });
       }
     })().catch((err) => {
-      globalForDb.agentBuilderAdminReady = undefined;
+      if (isDatabaseUnreachable(err)) resetDatabaseClient();
+      else globalForDb.agentBuilderAdminReady = undefined;
       throw err;
     });
   }

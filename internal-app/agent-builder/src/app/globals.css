@@ -32,37 +32,10 @@
       inset 0 0 0 1px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.12));
   }
 
-  /* Slim transparent-track scrollbars across all scrollable containers */
+  /* Overlay scrollbars: the thumb floats and does not reserve layout width. */
   * {
-    --scrollbar-thumb: color-mix(in srgb, var(--color-text-primary, #171717) 48%, transparent);
-    --scrollbar-thumb-hover: color-mix(in srgb, var(--color-text-primary, #171717) 68%, transparent);
-    --scrollbar-track: transparent;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-  }
-
-  @supports not (scrollbar-color: auto) {
-    * {
-      scrollbar-width: auto;
-    }
-
-    *::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-
-    *::-webkit-scrollbar-track {
-      background: var(--scrollbar-track);
-    }
-
-    *::-webkit-scrollbar-thumb {
-      background: var(--scrollbar-thumb);
-      border-radius: 999px;
-    }
-
-    *::-webkit-scrollbar-thumb:hover {
-      background: var(--scrollbar-thumb-hover);
-    }
+    scrollbar-width: auto;
+    scrollbar-color: auto;
   }
 
   [popover="manual"]:has(> [data-toast-id]) {
@@ -131,4 +104,27 @@
   ::view-transition-new(*) {
     animation: none !important;
   }
+}
+
+.astryx-chat-composer .chat-composer-model-selector {
+  --_field-radius: var(--_button-radius, var(--radius-element));
+}
+
+.chat-composer-queue-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-element);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.chat-composer-queue-action:hover {
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  color: var(--color-text-primary);
 }

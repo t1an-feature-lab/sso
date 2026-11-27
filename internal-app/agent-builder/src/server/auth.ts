@@ -10,7 +10,12 @@ import {
   type UserRole,
   type UsersPagePayload,
 } from "@/lib/types";
-import { db, ensureBuiltInAdmin } from "./db";
+import {
+  db,
+  ensureBuiltInAdmin,
+  isDatabaseUnreachable,
+  resetDatabaseClient,
+} from "./db";
 import { HttpError } from "./http";
 import { hashPassword, verifyPassword } from "./password";
 
@@ -69,20 +74,32 @@ export async function getCurrentSessionHash(): Promise<string | null> {
   return token && /^[a-f0-9]{64}$/.test(token) ? hashToken(token) : null;
 }
 
-export async function getCurrentUser(): Promise<PublicUser | null> {
-  await ensureBuiltInAdmin();
-  const sessionHash = await getCurrentSessionHash();
-  if (!sessionHash) return null;
-
-  const session = await db.authSession.findFirst({
+async function findCurrentSession(sessionHash: string) {
+  return db.authSession.findFirst({
     where: {
       tokenHash: sessionHash,
       expiresAt: { gt: new Date() },
     },
     include: { user: { select: PUBLIC_USER_SELECT } },
   });
+}
 
+async function loadCurrentUser(): Promise<PublicUser | null> {
+  await ensureBuiltInAdmin();
+  const sessionHash = await getCurrentSessionHash();
+  if (!sessionHash) return null;
+  const session = await findCurrentSession(sessionHash);
   return session?.user ? toPublicUser(session.user) : null;
+}
+
+export async function getCurrentUser(): Promise<PublicUser | null> {
+  try {
+    return await loadCurrentUser();
+  } catch (error) {
+    if (!isDatabaseUnreachable(error)) throw error;
+    resetDatabaseClient();
+    return loadCurrentUser();
+  }
 }
 
 export async function requireUser(next = "/"): Promise<PublicUser> {

@@ -381,6 +381,41 @@ export async function deleteModelConfig(modelId: string): Promise<void> {
   await db.modelConfig.delete({ where: { id: modelId } });
 }
 
+export async function getRunnableModel(modelId?: string | null): Promise<{
+  id: string;
+  provider: ModelProvider;
+  icon: ModelProviderIconId;
+  modelName: string;
+  baseUrl: string;
+  apiKey: string;
+}> {
+  const normalizedId = typeof modelId === "string" ? modelId.trim() : "";
+  const row = normalizedId
+    ? await db.modelConfig.findUnique({ where: { id: normalizedId } })
+    : ((await db.modelConfig.findFirst({
+        where: { isEnabled: true, isDefault: true },
+        orderBy: [{ updatedAt: "desc" }],
+      })) ??
+      (await db.modelConfig.findFirst({
+        where: { isEnabled: true },
+        orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+      })));
+  if (!row || !row.isEnabled) {
+    throw new HttpError(400, "请先配置可用模型");
+  }
+  const provider = resolveLegacyProvider(row.provider);
+  return {
+    id: row.id,
+    provider,
+    icon: VALID_ICONS.has(row.icon)
+      ? (row.icon as ModelProviderIconId)
+      : resolveDefaultIcon(row.provider, provider),
+    modelName: row.modelName,
+    baseUrl: row.baseUrl,
+    apiKey: row.apiKey,
+  };
+}
+
 export async function getModelConfigApiKey(modelId: string): Promise<string> {
   const existing = await db.modelConfig.findUnique({
     where: { id: modelId },

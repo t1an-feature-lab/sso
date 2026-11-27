@@ -15,9 +15,89 @@
 .ai-chat-panel-inner {
   width: var(--chat-panel-width);
   max-width: 100%;
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+.ai-chat-panel-inner > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.chat-activity,
+.chat-activity .astryx-chat-tool-calls,
+.chat-activity .astryx-chat-tool-calls div {
+  max-width: 100%;
+  min-width: 0;
+}
+.chat-failure-banner,
+.chat-failure-banner * {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.chat-failure-banner {
+  width: 100%;
+}
+.chat-live-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1-5);
+  min-height: 24px;
+  color: var(--color-text-secondary);
+}
+.chat-live-loading:not(:first-child) {
+  margin-block-start: var(--spacing-1);
+}
+.chat-provider-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  flex-shrink: 0;
+}
+.chat-message-hover {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-height: 1.75rem;
+  margin-block-start: var(--spacing-2);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+}
+.chat-message-hover .astryx-chat-message-metadata {
+  margin-block-start: 0;
+}
+.astryx-chat-message-bubble + div:has(> .chat-message-hover) {
+  margin-block-start: var(--spacing-2);
+}
+.astryx-chat-message-bubble + div > .chat-message-hover {
+  margin-block-start: 0;
+}
+.astryx-chat-message[data-sender="user"] .chat-message-hover {
+  flex-direction: row-reverse;
+}
+@media (hover: hover) {
+  .chat-message-hover {
+    opacity: 0;
+    transform: translateY(4px);
+    pointer-events: none;
+  }
+  .astryx-chat-message:hover .chat-message-hover,
+  .astryx-chat-message:focus-within .chat-message-hover {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-message-hover {
+    transition: none;
+  }
 }
 .ai-chat-panel[data-transitioning="true"] .ai-chat-panel-inner {
   min-width: var(--chat-panel-width);

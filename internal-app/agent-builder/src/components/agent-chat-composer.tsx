@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   ChatComposer,
   ChatComposerDrawer,
@@ -12,10 +12,11 @@ import {
   createStaticSource,
   TypeaheadItem,
   type SearchableItem,
+  type SearchSource,
 } from "@astryxdesign/core/Typeahead";
 import { Button } from "@astryxdesign/core/Button";
 import { Selector } from "@astryxdesign/core/Selector";
-import { HStack, StackItem } from "@astryxdesign/core/Stack";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -29,21 +30,93 @@ import {
 import {
   AtSymbolIcon as MentionIcon,
   PaperClipIcon as AttachIcon,
+  ArrowTurnDownLeftIcon,
+  DocumentTextIcon,
   FolderIcon,
   PlusIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
+import { useAppToast } from "@/components/app-toast";
 import { ModelProviderIcon } from "@/components/model-provider-icon";
 import { RobotIcon } from "@/components/robot-icon";
-import type { AvailableModelOption } from "@/lib/types";
+import { apiClient } from "@/lib/api-client";
+import type { AvailableModelOption, WorkspaceEntry } from "@/lib/types";
 
-const MENTION_ITEMS: SearchableItem<{ role: string }>[] = [
-  { id: "cindy", label: "Cindy Zhang", auxiliaryData: { role: "Design Systems" } },
-  { id: "alex", label: "Alex Johnson", auxiliaryData: { role: "Frontend" } },
-  { id: "sam", label: "Sam Rivera", auxiliaryData: { role: "Backend" } },
-  { id: "jordan", label: "Jordan Lee", auxiliaryData: { role: "Product" } },
-  { id: "taylor", label: "Taylor Kim", auxiliaryData: { role: "Design" } },
-  { id: "morgan", label: "Morgan Chen", auxiliaryData: { role: "Infrastructure" } },
-];
+const MAX_IMAGE_ATTACHMENTS = 6;
+
+const SUPPORTED_IMAGE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
+  "avif",
+  "tif",
+  "tiff",
+  "heic",
+  "heif",
+]);
+
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+  "image/bmp",
+  "image/x-ms-bmp",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "image/avif",
+  "image/tiff",
+  "image/heic",
+  "image/heif",
+  "image/heic-sequence",
+  "image/heif-sequence",
+]);
+
+const IMAGE_FILE_ACCEPT = [
+  ...SUPPORTED_IMAGE_MIME_TYPES,
+  ...[...SUPPORTED_IMAGE_EXTENSIONS].map((extension) => `.${extension}`),
+].join(",");
+
+function fileExtension(name: string) {
+  const base = name.trim().toLowerCase();
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0 || dot === base.length - 1) return "";
+  return base.slice(dot + 1);
+}
+
+function isSupportedImageFile(file: File) {
+  const extension = fileExtension(file.name);
+  if (SUPPORTED_IMAGE_EXTENSIONS.has(extension)) return true;
+  const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  return SUPPORTED_IMAGE_MIME_TYPES.has(mime);
+}
+
+type MentionItem = SearchableItem<{
+  kind: WorkspaceEntry["kind"];
+  directory: string;
+}>;
+
+function parentDirectory(filePath: string): string {
+  const slash = filePath.lastIndexOf("/");
+  return slash > 0 ? filePath.slice(0, slash) : "";
+}
+
+function toMentionItem(entry: WorkspaceEntry): MentionItem {
+  return {
+    id: entry.path,
+    label: entry.name,
+    auxiliaryData: {
+      kind: entry.kind,
+      directory: parentDirectory(entry.path),
+    },
+  };
+}
 
 const COMMAND_ITEMS: SearchableItem<{ description: string }>[] = [
   {
@@ -73,21 +146,46 @@ const COMMAND_ITEMS: SearchableItem<{ description: string }>[] = [
   },
 ];
 
-const mentionTrigger: ChatComposerTrigger = {
-  character: "@",
-  searchSource: createStaticSource(MENTION_ITEMS),
-  renderItem: (item) => (
+/** A mention chip is followed by a non-breaking space, which does not start an @ query. */
+function releaseMentionBoundary() {
+  const selection = window.getSelection();
+  if (!selection?.isCollapsed || selection.rangeCount === 0) return;
+  const range = selection.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return;
+  const text = node.textContent ?? "";
+  const offset = range.startOffset;
+  const before = text.slice(0, offset);
+  const activeQuery = before.match(/\u00A0(@[^ \t\n\u00A0]*)$/);
+  const nextBefore = activeQuery
+    ? `${before.slice(0, before.length - activeQuery[0].length)} ${activeQuery[1]}`
+    : before.endsWith("\u00A0")
+      ? `${before.slice(0, -1)} `
+      : null;
+  if (nextBefore == null) return;
+  node.textContent = nextBefore + text.slice(offset);
+  const caret = document.createRange();
+  caret.setStart(node, nextBefore.length);
+  caret.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(caret);
+}
+
+function renderMentionItem(item: SearchableItem) {
+  const data = item.auxiliaryData as MentionItem["auxiliaryData"] | undefined;
+  return (
     <TypeaheadItem
       item={item}
-      description={(item.auxiliaryData as { role: string })?.role}
+      description={data?.directory || undefined}
+      icon={
+        <Icon
+          icon={data?.kind === "directory" ? FolderIcon : DocumentTextIcon}
+          size="sm"
+        />
+      }
     />
-  ),
-  onSelect: (item) => ({
-    value: `@${item.id}`,
-    label: item.label,
-    variant: "blue",
-  }),
-};
+  );
+}
 
 const commandTrigger: ChatComposerTrigger = {
   character: "/",
@@ -105,8 +203,6 @@ const commandTrigger: ChatComposerTrigger = {
   }),
 };
 
-const composerTriggers = [mentionTrigger, commandTrigger];
-
 interface AttachmentItem {
   id: string;
   name: string;
@@ -117,11 +213,21 @@ export interface ProjectOption {
   name: string;
 }
 
+export interface ComposerQueueItem {
+  id: string;
+  content: string;
+}
+
 export interface AgentChatComposerProps {
   onSubmit: (value: string) => void | boolean | Promise<boolean | void>;
   isDisabled?: boolean;
+  isRunning?: boolean;
+  queue?: ComposerQueueItem[];
+  onStop?: () => void;
+  onQueue?: (value: string) => void;
+  onSendQueued?: (id: string) => void;
+  onRemoveQueued?: (id: string) => void;
   placeholder?: string;
-  defaultAttachments?: string[];
   inputStyle?: CSSProperties;
   models?: AvailableModelOption[];
   selectedModelId?: string | null;
@@ -129,15 +235,25 @@ export interface AgentChatComposerProps {
   onSelectModel?: (modelId: string) => void;
   projects?: ProjectOption[];
   selectedProjectId?: string | null;
+  projectId?: string | null;
   onSelectProject?: (projectId: string) => void;
   onCreateProject?: () => void;
+}
+
+function queueLabel(content: string): string {
+  return content.replace(/\s+/g, " ").trim();
 }
 
 export function AgentChatComposer({
   onSubmit,
   isDisabled = false,
+  isRunning = false,
+  queue = [],
+  onStop,
+  onQueue,
+  onSendQueued,
+  onRemoveQueued,
   placeholder = "Ask anything",
-  defaultAttachments = [],
   inputStyle,
   models = [],
   selectedModelId,
@@ -145,15 +261,13 @@ export function AgentChatComposer({
   onSelectModel,
   projects,
   selectedProjectId,
+  projectId,
   onSelectProject,
   onCreateProject,
 }: AgentChatComposerProps) {
-  const [attachments, setAttachments] = useState<AttachmentItem[]>(() =>
-    defaultAttachments.map((name, index) => ({
-      id: `initial-${index}`,
-      name,
-    }))
-  );
+  const toast = useAppToast();
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  const [composerValue, setComposerValue] = useState("");
 
   const composerInputRef = useRef<ChatComposerInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -184,19 +298,113 @@ export function AgentChatComposer({
     projects?.find((item) => item.id === selectedProjectId) ??
     projects?.[0] ??
     null;
+  const mentionProjectId =
+    projectId !== undefined ? projectId : (selectedProjectId ?? null);
+
+  const mentionProjectRef = useRef(mentionProjectId);
+  mentionProjectRef.current = mentionProjectId;
+  const mentionAbortRef = useRef<AbortController | null>(null);
+  const [mentionEntries, setMentionEntries] = useState<WorkspaceEntry[]>([]);
+  const [mentionState, setMentionState] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+
+  const mentionSource = useMemo<SearchSource<MentionItem>>(() => {
+    let controller: AbortController | null = null;
+    const search = (query: string) => {
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      const id = mentionProjectRef.current;
+      if (!id) return Promise.resolve([]);
+      return apiClient
+        .searchMentionableFiles(id, query, current.signal)
+        .then((result) => result.entries.map(toMentionItem))
+        .catch(() => [] as MentionItem[]);
+    };
+    return {
+      search,
+      bootstrap: () => search(""),
+      cancel() {
+        controller?.abort();
+      },
+    };
+  }, []);
+
+  const composerTriggers = useMemo<ChatComposerTrigger[]>(
+    () => [
+      {
+        character: "@",
+        searchSource: mentionSource,
+        renderItem: renderMentionItem,
+        menuLabel: "项目文件",
+        loadingText: "正在查找",
+        emptySearchText: mentionProjectId
+          ? "没有可引用的文件"
+          : "先选择 Project",
+        onSelect: (item) => ({
+          value: `@${item.id}`,
+          label: item.id,
+          variant: "blue",
+        }),
+      },
+      commandTrigger,
+    ],
+    [mentionProjectId, mentionSource]
+  );
+
+  useEffect(() => {
+    mentionAbortRef.current?.abort();
+    setMentionEntries([]);
+    setMentionState("idle");
+  }, [mentionProjectId]);
 
   function addFiles(files: File[]) {
     if (files.length === 0) return;
-    setAttachments((prev) => [
-      ...prev,
-      ...files.map((file) => ({
-        id: `file-${++nextAttachmentIdRef.current}`,
-        name: file.name,
-      })),
-    ]);
+
+    const images = files.filter(isSupportedImageFile);
+    const skippedType = files.length - images.length;
+    const remaining = MAX_IMAGE_ATTACHMENTS - attachments.length;
+    const accepted = images.slice(0, Math.max(0, remaining));
+    const skippedLimit = images.length - accepted.length;
+
+    if (accepted.length > 0) {
+      setAttachments((prev) => {
+        const room = MAX_IMAGE_ATTACHMENTS - prev.length;
+        const next = accepted.slice(0, Math.max(0, room));
+        if (next.length === 0) return prev;
+        return [
+          ...prev,
+          ...next.map((file) => ({
+            id: `file-${++nextAttachmentIdRef.current}`,
+            name: file.name,
+          })),
+        ];
+      });
+    }
+
+    if (skippedType > 0 && skippedLimit > 0) {
+      toast({
+        body: "仅支持常见图片，最多添加 6 张",
+        type: "error",
+        uniqueID: "attachment-reject",
+      });
+    } else if (skippedType > 0) {
+      toast({
+        body: "仅支持 JPG、PNG、GIF、WebP、SVG 等常见图片",
+        type: "error",
+        uniqueID: "attachment-type",
+      });
+    } else if (skippedLimit > 0) {
+      toast({
+        body: "最多添加 6 张图片",
+        type: "error",
+        uniqueID: "attachment-limit",
+      });
+    }
   }
 
-  function insertMention(item: (typeof MENTION_ITEMS)[number]) {
+  function insertMention(entry: WorkspaceEntry) {
     const input = composerInputRef.current;
     if (!input) return;
     input.focus();
@@ -206,10 +414,38 @@ export function AgentChatComposer({
       sel?.collapseToEnd();
     }
     input.insertToken({
-      value: `@${item.id}`,
-      label: item.label,
+      value: `@${entry.path}`,
+      label: entry.path,
       variant: "blue",
     });
+  }
+
+  function handleMentionMenu(isOpen: boolean) {
+    mentionAbortRef.current?.abort();
+    if (!isOpen) return;
+    const id = mentionProjectRef.current;
+    if (!id) {
+      setMentionEntries([]);
+      setMentionState("ready");
+      return;
+    }
+    const controller = new AbortController();
+    mentionAbortRef.current = controller;
+    setMentionState((current) =>
+      current === "ready" ? current : "loading"
+    );
+    void apiClient
+      .searchMentionableFiles(id, "", controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setMentionEntries(result.entries);
+        setMentionState("ready");
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setMentionEntries([]);
+        setMentionState("error");
+      });
   }
 
   async function handleComposerSubmit(value: string) {
@@ -223,9 +459,22 @@ export function AgentChatComposer({
     }
   }
 
+  const hasDraft = composerValue.trim().length > 0;
+  const drawerCount = queue.length + attachments.length;
+
   return (
     <ChatComposer
-      onSubmit={(value) => void handleComposerSubmit(value)}
+      value={composerValue}
+      onChange={setComposerValue}
+      onSubmit={(value) => {
+        if (isRunning) {
+          onQueue?.(value);
+          return;
+        }
+        void handleComposerSubmit(value);
+      }}
+      isStopShown={isRunning && !hasDraft}
+      onStop={onStop}
       isDisabled={isDisabled}
       placeholder={placeholder}
       input={
@@ -233,12 +482,76 @@ export function AgentChatComposer({
           handleRef={composerInputRef}
           triggers={composerTriggers}
           style={inputStyle}
+          onKeyDown={(event) => {
+            if (
+              event.nativeEvent.isComposing ||
+              event.ctrlKey ||
+              event.metaKey ||
+              event.altKey ||
+              event.key.length !== 1
+            ) {
+              return;
+            }
+            releaseMentionBoundary();
+          }}
           onFiles={addFiles}
         />
       }
       drawer={
-        attachments.length > 0 ? (
-          <ChatComposerDrawer count={attachments.length}>
+        drawerCount > 0 ? (
+          <ChatComposerDrawer
+            count={drawerCount}
+            label={queue.length > 0 ? "消息" : "附件"}
+          >
+            {queue.length > 0 ? (
+              <VStack
+                gap={1}
+                width="100%"
+                style={{ minWidth: "100%", flex: "1 0 100%" }}
+              >
+                {queue.map((item) => (
+                  <HStack
+                    key={item.id}
+                    gap={2}
+                    vAlign="center"
+                    width="100%"
+                    style={{
+                      boxSizing: "border-box",
+                      paddingInline: "var(--spacing-2)",
+                      paddingBlock: "var(--spacing-1)",
+                      borderRadius: "var(--radius-inner)",
+                      background: "var(--color-neutral)",
+                    }}
+                  >
+                    <StackItem size="fill" style={{ minWidth: 0 }}>
+                      <Text type="label" maxLines={1}>
+                        {queueLabel(item.content)}
+                      </Text>
+                    </StackItem>
+                    <HStack gap={1} vAlign="center">
+                      <button
+                        type="button"
+                        className="chat-composer-queue-action"
+                        aria-label="发送"
+                        onClick={() => onSendQueued?.(item.id)}
+                      >
+                        <Icon icon={ArrowTurnDownLeftIcon} size="sm" />
+                      </button>
+                      {onRemoveQueued ? (
+                        <button
+                          type="button"
+                          className="chat-composer-queue-action"
+                          aria-label="删除"
+                          onClick={() => onRemoveQueued(item.id)}
+                        >
+                          <Icon icon={TrashIcon} size="sm" />
+                        </button>
+                      ) : null}
+                    </HStack>
+                  </HStack>
+                ))}
+              </VStack>
+            ) : null}
             {attachments.map((item) => (
               <Token
                 key={item.id}
@@ -257,23 +570,37 @@ export function AgentChatComposer({
         <>
           <DropdownMenu
             button={{
-              label: "Reference",
+              label: "引用文件",
               variant: "ghost",
               size: "sm",
               icon: <Icon icon={MentionIcon} size="sm" />,
               isIconOnly: true,
             }}
             hasChevron={false}
-            menuWidth={240}
+            menuWidth={320}
+            onOpenChange={handleMentionMenu}
           >
-            {MENTION_ITEMS.map((item) => (
-              <DropdownMenuItem
-                key={item.id}
-                label={item.label}
-                description={item.auxiliaryData?.role}
-                onClick={() => insertMention(item)}
-              />
-            ))}
+            {!mentionProjectId ? (
+              <DropdownMenuItem label="先选择 Project" isDisabled />
+            ) : mentionState === "error" ? (
+              <DropdownMenuItem label="读取文件失败" isDisabled />
+            ) : mentionState !== "ready" ? (
+              <DropdownMenuItem label="正在查找" isDisabled />
+            ) : mentionEntries.length === 0 ? (
+              <DropdownMenuItem label="没有可引用的文件" isDisabled />
+            ) : (
+              mentionEntries.map((entry) => (
+                <DropdownMenuItem
+                  key={`${entry.kind}:${entry.path}`}
+                  label={entry.name}
+                  description={parentDirectory(entry.path) || undefined}
+                  icon={
+                    entry.kind === "directory" ? FolderIcon : DocumentTextIcon
+                  }
+                  onClick={() => insertMention(entry)}
+                />
+              ))
+            )}
           </DropdownMenu>
           <Button
             label="Attach"
@@ -286,6 +613,7 @@ export function AgentChatComposer({
           <input
             ref={fileInputRef}
             type="file"
+            accept={IMAGE_FILE_ACCEPT}
             multiple
             hidden
             onClick={(event) => event.stopPropagation()}
@@ -304,6 +632,7 @@ export function AgentChatComposer({
             isLabelHidden
             variant="ghost"
             size="md"
+            controlClassName="chat-composer-model-selector"
             value={activeModel?.id}
             placeholder="暂无可用模型"
             options={modelSelectorOptions}

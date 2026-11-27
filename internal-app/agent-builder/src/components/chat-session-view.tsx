@@ -7,12 +7,12 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
 import {
   HStack,
   VStack,
-  StackItem,
   Layout,
   LayoutContent,
 } from "@astryxdesign/core/Layout";
@@ -20,46 +20,41 @@ import { Text } from "@astryxdesign/core/Text";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import {
   ChatLayout,
+  ChatLayoutScrollButton,
   ChatMessage,
   ChatMessageBubble,
   ChatMessageList,
   ChatMessageMetadata,
-  ChatSystemMessage,
-  ChatTokenizedText,
   ChatToolCalls,
 } from "@astryxdesign/core/Chat";
-import { Avatar } from "@astryxdesign/core/Avatar";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
-import { ClickableCard } from "@astryxdesign/core/ClickableCard";
-import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Markdown } from "@astryxdesign/core/Markdown";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
-import { Token } from "@astryxdesign/core/Token";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { CheckIndicator } from "@astryxdesign/core/Indicator";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Popover } from "@astryxdesign/core/Popover";
 import { useResizable, ResizeHandle } from "@astryxdesign/core/Resizable";
-import { rtlStyles } from "@astryxdesign/core/utils";
+import { useClipboard } from "@astryxdesign/core/hooks";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import {
   ArrowLeftIcon,
-  DocumentTextIcon as DocumentIcon,
-  ChevronRightIcon,
   PencilSquareIcon,
   PlusIcon,
   ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
 import { AgentChatComposer } from "@/components/agent-chat-composer";
+import { ModelProviderIcon } from "@/components/model-provider-icon";
 import { useAppToast } from "@/components/app-toast";
 import {
   IdePreviewPanel,
   type PersistedWorkspaceTabs,
-  type WorkspacePanelTab,
-  type WorkspaceTabRequest,
 } from "@/components/ide-preview-panel";
 import {
   ProjectFormDialog,
@@ -77,7 +72,12 @@ import {
 } from "@/lib/chat-panel-prefs";
 import type {
   AvailableModelOption,
+  ChatMessagePart,
   ChatSessionDetail,
+  ChatStepPart,
+  ChatToolPart,
+  ModelProviderIconId,
+  ProjectFile,
   ProjectSummary,
 } from "@/lib/types";
 import "./chat-session-view.css";
@@ -105,345 +105,304 @@ const chatPanelWidthVar = (size: number | string): CSSProperties =>
     "--chat-panel-width": typeof size === "number" ? `${size}px` : size,
   }) as CSSProperties;
 
-const MENTION_TOKENS = [
-  { value: "@agent", label: "@Agent", variant: "blue" as const },
-];
+type LiveDraft = {
+  parts: ChatMessagePart[];
+  icon: ModelProviderIconId;
+};
 
-const ARTIFACT_TITLE = "JWT Token Refresh: Design & Rollout";
+type QueuedTurn = {
+  id: string;
+  content: string;
+  modelId: string | null;
+};
 
-const DEMO_MIDDLEWARE_CODE = `async function authMiddleware(req: Request) {
-  try {
-    const decoded = validateToken(req.headers.authorization);
-    req.user = decoded;
-  } catch (err) {
-    if (err instanceof TokenExpiredError) {
-      // Attempt silent refresh before rejecting
-      const refreshed = await refreshToken(req.cookies.refreshToken);
-      if (refreshed) {
-        req.user = refreshed.user;
-        req.newAccessToken = refreshed.accessToken;
-        return next(req);
-      }
-    }
-    return new Response('Unauthorized', { status: 401 });
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function formatDuration(
+  startedAt?: string,
+  endedAt?: string | null
+): string | undefined {
+  if (!startedAt || !endedAt) return undefined;
+  const ms = Date.parse(endedAt) - Date.parse(startedAt);
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  if (ms < 1000) return `${Math.max(ms, 1)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return seconds >= 10 ? `${Math.round(seconds)}s` : `${seconds.toFixed(1)}s`;
   }
-  return next(req);
-}`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
+}
 
-const DEMO_TEST_CODE = `describe('authMiddleware', () => {
-  it('refreshes an expired token silently', async () => {
-    const expiredToken = createExpiredJWT(mockUser);
-    const validRefresh = createRefreshToken(mockUser);
+function commandLabel(command: string): string {
+  return command.replace(/\s+/g, " ").trim();
+}
 
-    const req = mockRequest({
-      authorization: \`Bearer \${expiredToken}\`,
-      cookies: { refreshToken: validRefresh },
-    });
+function commandBody(output: string): string {
+  const marker = output.indexOf("\n---\n");
+  return (marker >= 0 ? output.slice(marker + 5) : output).trim().slice(0, 4000);
+}
 
-    const res = await authMiddleware(req);
+function stepTarget(step: ChatStepPart): string {
+  if (step.status !== "complete") return step.label;
+  return step.label.replace(/^正在/, "已");
+}
 
-    expect(res.status).toBe(200);
-    expect(req.user.id).toBe(mockUser.id);
-    expect(req.newAccessToken).toBeDefined();
-  });
-});`;
+function withText(parts: ChatMessagePart[], delta: string): ChatMessagePart[] {
+  if (!delta) return parts;
+  const last = parts.at(-1);
+  if (last?.type === "text") {
+    return [...parts.slice(0, -1), { type: "text", text: last.text + delta }];
+  }
+  return [...parts, { type: "text", text: delta }];
+}
 
-function ArtifactCard({
-  title,
-  onOpen,
+function withTool(
+  parts: ChatMessagePart[],
+  toolPart: ChatToolPart
+): ChatMessagePart[] {
+  const index = parts.findIndex(
+    (part) => part.type === "tool" && part.id === toolPart.id
+  );
+  if (index < 0) return [...parts, toolPart];
+  const next = parts.slice();
+  next[index] = toolPart;
+  return next;
+}
+
+function withSteps(
+  parts: ChatMessagePart[],
+  steps: ChatStepPart[]
+): ChatMessagePart[] {
+  const next = parts.slice();
+  for (const step of steps) {
+    const index = next.findIndex(
+      (part) => part.type === "step" && part.id === step.id
+    );
+    if (index >= 0) next[index] = step;
+    else next.push(step);
+  }
+  return next;
+}
+
+type ActivityCall = {
+  key: string;
+  name: string;
+  target: string;
+  node?: string;
+  status: "running" | "error" | "complete";
+  duration?: string;
+  stats?: string;
+  errorMessage?: string;
+  resultDetail?: ReactNode;
+};
+
+function toActivityCall(part: ChatStepPart | ChatToolPart): ActivityCall {
+  if (part.type === "step") {
+    return {
+      key: part.id,
+      name: "准备",
+      target: stepTarget(part),
+      status: part.status,
+      duration: formatDuration(part.startedAt, part.endedAt),
+      errorMessage: part.status === "error" ? part.label : undefined,
+    };
+  }
+  const output = commandBody(part.output);
+  const failed =
+    part.status === "error" || (part.exitCode != null && part.exitCode !== 0);
+  return {
+    key: part.id,
+    name: "shell",
+    target: commandLabel(part.command),
+    node: "sandbox",
+    status:
+      part.status === "running" && !part.background
+        ? "running"
+        : failed
+          ? "error"
+          : "complete",
+    duration: formatDuration(part.startedAt, part.endedAt),
+    stats: part.background ? "后台" : undefined,
+    errorMessage: failed ? "命令执行失败" : undefined,
+    resultDetail: output ? (
+      <CodeBlock
+        code={output}
+        title="命令输出"
+        size="sm"
+        width="100%"
+        maxHeight={240}
+        isWrapped
+        hasLineNumbers={false}
+      />
+    ) : undefined,
+  };
+}
+
+type TranscriptBlock =
+  | { kind: "activity"; calls: ActivityCall[] }
+  | { kind: "text"; text: string };
+
+function transcriptBlocks(parts: ChatMessagePart[]): TranscriptBlock[] {
+  const blocks: TranscriptBlock[] = [];
+  let calls: ActivityCall[] = [];
+  const flush = () => {
+    if (calls.length === 0) return;
+    blocks.push({ kind: "activity", calls });
+    calls = [];
+  };
+  for (const part of parts) {
+    if (part.type === "text") {
+      if (!part.text.trim()) continue;
+      flush();
+      blocks.push({ kind: "text", text: part.text });
+      continue;
+    }
+    calls.push(toActivityCall(part));
+  }
+  flush();
+  return blocks;
+}
+
+const GENERATION_FAILURE_MARKER = "生成失败：";
+
+function splitGenerationFailure(text: string): {
+  body: string;
+  failure: string | null;
+} {
+  const trimmed = text.trim();
+  if (trimmed.startsWith(GENERATION_FAILURE_MARKER)) {
+    return {
+      body: "",
+      failure: trimmed.slice(GENERATION_FAILURE_MARKER.length).trim(),
+    };
+  }
+  const marker = `\n\n${GENERATION_FAILURE_MARKER}`;
+  const index = trimmed.lastIndexOf(marker);
+  if (index < 0) return { body: text, failure: null };
+  return {
+    body: trimmed.slice(0, index).trim(),
+    failure: trimmed.slice(index + marker.length).trim(),
+  };
+}
+
+function MessageHoverBar({
+  text,
+  timestamp,
 }: {
-  title: string;
-  onOpen: () => void;
+  text: string;
+  timestamp?: string;
 }) {
+  const { copy, isCopied } = useClipboard({ announce: "已复制" });
+  const copyText = text.trim();
+  if (!timestamp && !copyText) return null;
+
   return (
-    <ClickableCard
-      label={`Open ${title}`}
-      onClick={onOpen}
-      variant="muted"
-      padding={3}
-      maxWidth={360}
-    >
-      <HStack gap={3} vAlign="center" width="100%">
-        <Icon icon={DocumentIcon} size="md" color="secondary" />
-        <StackItem size="fill">
-          <VStack gap={0}>
-            <Text type="label" weight="semibold" maxLines={1}>
-              {title}
-            </Text>
-            <Text type="supporting" color="secondary">
-              Document
-            </Text>
-          </VStack>
-        </StackItem>
-        <Icon
-          icon={ChevronRightIcon}
-          size="sm"
-          color="secondary"
-          xstyle={rtlStyles.mirror}
+    <div className="chat-message-hover">
+      {timestamp ? (
+        <ChatMessageMetadata
+          timestamp={<Timestamp value={timestamp} format="time" />}
         />
-      </HStack>
-    </ClickableCard>
+      ) : null}
+      {copyText ? (
+        <Button
+          label={isCopied ? "已复制" : "复制"}
+          variant="ghost"
+          size="sm"
+          isIconOnly
+          icon={<Icon icon={isCopied ? "check" : "copy"} size="sm" />}
+          onClick={() => void copy(copyText)}
+        />
+      ) : null}
+    </div>
   );
 }
 
-function FullAIChatExchange({
+function AssistantMessageView({
+  content,
+  parts,
   timestamp,
-  onOpenArtifact,
+  icon,
+  isLive = false,
 }: {
-  timestamp: string;
-  onOpenArtifact: () => void;
+  content: string;
+  parts: ChatMessagePart[];
+  timestamp?: string;
+  icon: ModelProviderIconId;
+  isLive?: boolean;
 }) {
+  const blocks = transcriptBlocks(parts);
+  const hasText = blocks.some((block) => block.kind === "text");
+  const transcript = blocks
+    .flatMap((block) => (block.kind === "text" ? [block.text.trim()] : []))
+    .filter(Boolean)
+    .join("\n\n");
+  const fallback =
+    !hasText && blocks.length === 0 ? content.trim() : "";
+  const copyText = transcript || fallback;
+
   return (
-    <>
-      {/* User message 1: mention + file attachments */}
-      <ChatMessage sender="user">
-        <HStack gap={1} wrap="wrap">
-          <Token label="auth-service.ts" />
-          <Token label="middleware.ts" />
-        </HStack>
-        <ChatMessageBubble
-          metadata={
-            <ChatMessageMetadata
-              timestamp={<Timestamp value={timestamp} format="time" />}
-            />
-          }
-        >
-          <ChatTokenizedText tokens={MENTION_TOKENS}>
-            @agent Can you review these auth files? The JWT refresh logic seems
-            broken — tokens expire but the middleware doesn&apos;t catch it.
-          </ChatTokenizedText>
-        </ChatMessageBubble>
-      </ChatMessage>
-
-      {/* Assistant message 1: tool calls, markdown, code block */}
-      <ChatMessage
-        sender="assistant"
-        avatar={<Avatar name="Agent" size="md" />}
-      >
-        <ChatMessageBubble variant="ghost">
-          Looking into the auth files now. Let me read through the code and
-          trace the token refresh flow.
-        </ChatMessageBubble>
-        <ChatToolCalls
-          defaultIsExpanded
-          calls={[
-            {
-              name: "read",
-              target: "auth-service.ts",
-              status: "complete",
-              duration: "45ms",
-            },
-            {
-              name: "read",
-              target: "middleware.ts",
-              status: "complete",
-              duration: "38ms",
-            },
-            {
-              name: "bash",
-              target: 'grep -rn "refreshToken" src/',
-              status: "complete",
-              duration: "120ms",
-              node: "cli:remote-server",
-            },
-          ]}
-        />
-
-        <ChatMessageBubble variant="ghost">
-          <Markdown density="compact">{`Found the issue. In \`middleware.ts\`, the token validation runs **before** the refresh check. When a token expires, the middleware rejects the request immediately instead of attempting a refresh.
-
-Here's the problematic sequence:
-
-1. Request arrives with an expired access token
-2. \`validateToken()\` throws \`TokenExpiredError\`
-3. The catch block returns \`401\` — never reaching \`refreshToken()\`
-
-The fix is to catch \`TokenExpiredError\` specifically and attempt a refresh before rejecting:`}</Markdown>
-        </ChatMessageBubble>
-
-        <ChatMessageBubble variant="ghost">
-          <CodeBlock
-            title="middleware.ts"
-            language="typescript"
-            code={DEMO_MIDDLEWARE_CODE}
-          />
-        </ChatMessageBubble>
-
-        <ChatToolCalls
-          calls={[
-            {
-              name: "edit",
-              target: "middleware.ts",
-              status: "complete",
-              duration: "85ms",
-              additions: 8,
-              deletions: 2,
-            },
-          ]}
-        />
-
-        <ChatMessageMetadata
-          timestamp={<Timestamp value={timestamp} format="time" />}
-          footer={
-            <Text type="supporting" color="secondary">
-              Agent
-            </Text>
-          }
-        />
-      </ChatMessage>
-
-      {/* User message 2: multi-bubble grouping */}
-      <ChatMessage sender="user">
-        <ChatMessageBubble group="first">
-          Nice catch, that makes sense
-        </ChatMessageBubble>
-        <ChatMessageBubble
-          group="last"
-          metadata={
-            <ChatMessageMetadata
-              timestamp={<Timestamp value={timestamp} format="time" />}
-              status="delivered"
-            />
-          }
-        >
-          Can you also add a test for the refresh path?
-        </ChatMessageBubble>
-      </ChatMessage>
-
-      {/* Assistant message 2: test results table + code block */}
-      <ChatMessage
-        sender="assistant"
-        avatar={<Avatar name="Agent" size="md" />}
-      >
-        <ChatToolCalls
-          defaultIsExpanded
-          calls={[
-            {
-              name: "read",
-              target: "middleware.test.ts",
-              status: "complete",
-              duration: "32ms",
-            },
-            {
-              name: "edit",
-              target: "middleware.test.ts",
-              status: "complete",
-              duration: "110ms",
-              additions: 24,
-              deletions: 0,
-            },
-            {
-              name: "bash",
-              target: "yarn test middleware",
-              status: "complete",
-              duration: "3.2s",
-              node: "cli:remote-server",
-            },
-          ]}
-        />
-        <ChatMessageBubble variant="ghost">
-          <Markdown density="compact">{`Added a test for the refresh flow. All **4 tests** pass:
-
-| Test | Status |
-|------|--------|
-| Valid token passes through | ✅ |
-| Expired token triggers refresh | ✅ |
-| Expired token with invalid refresh returns 401 | ✅ |
-| Malformed token returns 401 immediately | ✅ |`}</Markdown>
-        </ChatMessageBubble>
-
-        <ChatMessageBubble variant="ghost">
-          <CodeBlock
-            title="middleware.test.ts"
-            language="typescript"
-            code={DEMO_TEST_CODE}
-          />
-        </ChatMessageBubble>
-        <ChatMessageMetadata
-          timestamp={<Timestamp value={timestamp} format="time" />}
-        />
-      </ChatMessage>
-
-      {/* Status message */}
-      <ChatSystemMessage>Changes saved to workspace</ChatSystemMessage>
-
-      {/* User message 3: requests a document artifact */}
-      <ChatMessage sender="user">
-        <ChatMessageBubble
-          metadata={
-            <ChatMessageMetadata
-              timestamp={<Timestamp value={timestamp} format="time" />}
-            />
-          }
-        >
-          Looks solid. Before I open the PR, can you write up a short design doc
-          explaining the token-refresh flow for the team?
-        </ChatMessageBubble>
-      </ChatMessage>
-
-      {/* Assistant message 3: artifact card */}
-      <ChatMessage
-        sender="assistant"
-        avatar={<Avatar name="Agent" size="md" />}
-      >
-        <ChatMessageBubble variant="ghost">
-          <Markdown density="compact">
-            {`I've drafted a design doc covering the problem, the fix, and the test matrix — pulling straight from the changes we just made.\n\nOpen the document below to review it. Want me to expand any section?`}
+    <ChatMessage
+      sender="assistant"
+      avatar={
+        <span className="chat-provider-avatar">
+          <ModelProviderIcon icon={icon} size={20} />
+        </span>
+      }
+    >
+      {blocks.map((block, index) => {
+        if (block.kind === "activity") {
+          return (
+            <div className="chat-activity" key={`activity-${index}`}>
+              <ChatToolCalls
+                defaultIsExpanded={isLive}
+                label={`${block.calls.length} 个步骤`}
+                calls={block.calls}
+              />
+            </div>
+          );
+        }
+        const { body, failure } = splitGenerationFailure(block.text);
+        return (
+          <Fragment key={`text-${index}`}>
+            {body ? (
+              <ChatMessageBubble variant="ghost" width="100%">
+                <Markdown density="compact" contentWidth="100%">
+                  {body}
+                </Markdown>
+              </ChatMessageBubble>
+            ) : null}
+            {failure !== null ? (
+              <Banner
+                status="error"
+                title="生成失败"
+                description={failure || undefined}
+                className="chat-failure-banner"
+              />
+            ) : null}
+          </Fragment>
+        );
+      })}
+      {fallback ? (
+        <ChatMessageBubble variant="ghost" width="100%">
+          <Markdown density="compact" contentWidth="100%">
+            {fallback}
           </Markdown>
         </ChatMessageBubble>
-        <ChatMessageBubble
-          variant="ghost"
-          width="100%"
-          metadata={
-            <ChatMessageMetadata
-              timestamp={<Timestamp value={timestamp} format="time" />}
-            />
-          }
-        >
-          <ArtifactCard title={ARTIFACT_TITLE} onOpen={onOpenArtifact} />
-        </ChatMessageBubble>
-      </ChatMessage>
-
-      {/* User follow-up */}
-      <ChatMessage sender="user">
-        <ChatMessageBubble
-          metadata={
-            <ChatMessageMetadata
-              timestamp={<Timestamp value={timestamp} format="time" />}
-              status="delivered"
-            />
-          }
-        >
-          This is great. Can you add a section on rollout and monitoring at the
-          end?
-        </ChatMessageBubble>
-      </ChatMessage>
-
-      {/* Assistant message 4: in-progress tool call */}
-      <ChatMessage
-        sender="assistant"
-        avatar={<Avatar name="Agent" size="md" />}
-      >
-        <ChatMessageBubble variant="ghost">
-          <Markdown density="compact">
-            {`On it — adding a **Rollout & Monitoring** section with a staged flag ramp and the alert thresholds. Updating the document now.`}
-          </Markdown>
-        </ChatMessageBubble>
-        <ChatToolCalls
-          calls={[
-            {
-              name: "edit",
-              target: "docs/token-refresh.md",
-              status: "running",
-              node: "cli:remote-server",
-            },
-          ]}
-        />
-        <ChatMessageMetadata
-          timestamp={<Timestamp value={timestamp} format="time" />}
-        />
-      </ChatMessage>
-    </>
+      ) : null}
+      {timestamp ? (
+        <MessageHoverBar text={copyText} timestamp={timestamp} />
+      ) : null}
+      {isLive ? (
+        <div className="chat-live-loading" role="status">
+          <Spinner size="sm" shade="subtle" aria-hidden="true" />
+          <Text type="supporting">loading...</Text>
+        </div>
+      ) : null}
+    </ChatMessage>
   );
 }
 
@@ -471,11 +430,21 @@ export function ChatSessionView({
       initialModels[0]?.id ??
       null
   );
+  const fallbackModelIcon: ModelProviderIconId =
+    initialModels.find((item) => item.isDefault)?.icon ??
+    initialModels[0]?.icon ??
+    "openai";
   const [sending, setSending] = useState(false);
+  const [isAwayFromBottom, setIsAwayFromBottom] = useState(false);
+  const [draft, setDraft] = useState<LiveDraft | null>(null);
+  const [queue, setQueue] = useState<QueuedTurn[]>([]);
+  const queueRef = useRef<QueuedTurn[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
+  const runningRef = useRef(false);
+  const stopQueueRef = useRef(false);
+  const queueIdRef = useRef(0);
+  const autoRanRef = useRef(false);
   const [creatingSession, setCreatingSession] = useState(false);
-  const [tabRequest, setTabRequest] = useState<WorkspaceTabRequest | null>(
-    null
-  );
   const [isChatOpen, setIsChatOpen] = useState(true);
   const [isChatTransitioning, setIsChatTransitioning] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -491,7 +460,6 @@ export function ChatSessionView({
     | null
   >(null);
   const projectDialogNonceRef = useRef(0);
-  const tabRequestNonceRef = useRef(0);
 
   // Rename session modal state
   const [renameSessionNonce, setRenameSessionNonce] = useState<number | null>(
@@ -523,17 +491,20 @@ export function ChatSessionView({
     const el = chatScrollRef.current;
     if (!el) return;
 
-    const pinToBottom = () => {
-      const target = el.scrollHeight - el.clientHeight;
-      if (target > 0 && el.scrollTop !== target) {
-        el.scrollTop = target;
-      }
-    };
-
-    pinToBottom();
-
     let stopped = false;
+    let pinning = false;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const pinToBottom = () => {
+      if (stopped) return;
+      const target = el.scrollHeight - el.clientHeight;
+      if (target <= 0 || Math.abs(el.scrollTop - target) < 1) return;
+      pinning = true;
+      el.scrollTop = target;
+      requestAnimationFrame(() => {
+        pinning = false;
+      });
+    };
 
     const stopPinning = () => {
       if (stopped) return;
@@ -543,18 +514,26 @@ export function ChatSessionView({
         settleTimer = null;
       }
       observer?.disconnect();
-      el.removeEventListener("wheel", stopPinning);
-      el.removeEventListener("touchstart", stopPinning);
-      el.removeEventListener("pointerdown", stopPinning);
-      el.removeEventListener("keydown", stopPinning);
+      el.removeEventListener("scroll", onScroll);
+    };
+
+    const onScroll = () => {
+      if (pinning) {
+        pinning = false;
+        return;
+      }
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (remaining > 48) stopPinning();
     };
 
     const observer =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => {
-            if (!stopped) pinToBottom();
+            pinToBottom();
           })
         : null;
+
+    pinToBottom();
 
     if (observer) {
       observer.observe(el);
@@ -563,29 +542,46 @@ export function ChatSessionView({
       }
     }
 
-    el.addEventListener("wheel", stopPinning, { passive: true });
-    el.addEventListener("touchstart", stopPinning, { passive: true });
-    el.addEventListener("pointerdown", stopPinning, { passive: true });
-    el.addEventListener("keydown", stopPinning);
-
-    const scheduleStop = () => {
-      if (stopped) return;
-      if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(stopPinning, 350);
-    };
+    el.addEventListener("scroll", onScroll, { passive: true });
 
     if (document.fonts?.ready) {
       void document.fonts.ready.then(() => {
-        if (!stopped) {
-          pinToBottom();
-          scheduleStop();
-        }
+        pinToBottom();
       });
     }
     settleTimer = setTimeout(stopPinning, 1200);
 
     return stopPinning;
+    // Opens the session on the latest message. Later growth is followed by
+    // ChatLayout only while the reader stays at the bottom.
   }, [session.id]);
+
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const away = el.scrollHeight - el.scrollTop - el.clientHeight > 80;
+      setIsAwayFromBottom((current) => (current === away ? current : away));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const content = el.firstElementChild;
+    const observer =
+      content && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(update)
+        : null;
+    if (content) observer?.observe(content);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [session.id]);
+
+  function scrollMessagesToBottom() {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+  }
 
   useEffect(() => {
     const media = window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`);
@@ -816,17 +812,6 @@ export function ChatSessionView({
     }, 320);
   }
 
-  function openPanel(preferredTab?: WorkspacePanelTab) {
-    if (preferredTab) {
-      tabRequestNonceRef.current += 1;
-      setTabRequest({ tab: preferredTab, nonce: tabRequestNonceRef.current });
-    }
-    const width = rootRef.current?.offsetWidth ?? Infinity;
-    if (width <= MOBILE_MAX_WIDTH) {
-      setIsMobileDialogOpen(true);
-    }
-  }
-
   function toggleChatPanel() {
     const width = rootRef.current?.offsetWidth ?? Infinity;
     if (width <= MOBILE_MAX_WIDTH) {
@@ -836,46 +821,265 @@ export function ChatSessionView({
     }
   }
 
-  async function handleSend(value: string): Promise<boolean> {
-    const content = value.trim();
-    if (!content || sending) return false;
+  function applySession(updated: ChatSessionDetail) {
+    setSession(updated);
+    setProjects((prev) =>
+      prev.map((project) =>
+        project.id === updated.projectId
+          ? {
+              ...project,
+              sessions: project.sessions.map((item) =>
+                item.id === updated.id
+                  ? {
+                      ...item,
+                      title: updated.title,
+                      updatedAt: updated.updatedAt,
+                    }
+                  : item
+              ),
+            }
+          : project
+      )
+    );
+  }
 
-    setSending(true);
+  function applyWorkspace(update: {
+    files: ProjectFile[];
+    previewUrl: string | null;
+  }) {
+    setSession((prev) => ({
+      ...prev,
+      files: update.files,
+      previewUrl: update.previewUrl,
+    }));
+  }
+
+  function syncQueue(next: QueuedTurn[]) {
+    queueRef.current = next;
+    setQueue(next);
+  }
+
+  function nextQueueId(): string {
+    queueIdRef.current += 1;
+    return `queue-${queueIdRef.current}`;
+  }
+
+  async function refreshAfterRun(waitForAssistant: boolean): Promise<boolean> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const refreshed = await apiClient.getSession(session.id).catch(() => null);
+      if (!refreshed) return false;
+      applySession(refreshed.session);
+      const last = refreshed.session.messages.at(-1);
+      if (!waitForAssistant || last?.role === "assistant") return true;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return true;
+  }
+
+  async function runAgent(input: {
+    content?: string;
+    continueExisting?: boolean;
+    modelId?: string | null;
+  }): Promise<boolean> {
+    const content = input.content?.trim() ?? "";
+    if (!input.continueExisting && !content) return false;
+    if (stopQueueRef.current) return false;
+
+    const modelId =
+      input.modelId === undefined ? selectedModelId : input.modelId;
+    const draftIcon: ModelProviderIconId =
+      initialModels.find((item) => item.id === modelId)?.icon ??
+      fallbackModelIcon;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setDraft({ parts: [], icon: draftIcon });
+    const snapshot = session;
+    if (!input.continueExisting) {
+      setSession((prev) => ({
+        ...prev,
+        messages: [
+          ...prev.messages,
+          {
+            id: `local-${Date.now()}`,
+            sessionId: prev.id,
+            role: "user",
+            content,
+            parts: [],
+            modelIcon: null,
+            artifactTitle: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }));
+    }
+
+    let completed = false;
     try {
-      const { session: updated } = await apiClient.sendMessage(
+      await apiClient.streamSession(
         session.id,
-        content
+        {
+          content: input.continueExisting ? undefined : content,
+          modelId,
+          continueExisting: input.continueExisting,
+        },
+        (event, data) => {
+          if (event === "status" && data.steps) {
+            setDraft((prev) =>
+              prev ? { ...prev, parts: withSteps(prev.parts, data.steps ?? []) } : prev
+            );
+          } else if (event === "text" && data.delta) {
+            setDraft((prev) =>
+              prev
+                ? { ...prev, parts: withText(prev.parts, data.delta ?? "") }
+                : prev
+            );
+          } else if (event === "tool" && data.tool) {
+            const toolPart = data.tool;
+            setDraft((prev) =>
+              prev ? { ...prev, parts: withTool(prev.parts, toolPart) } : prev
+            );
+          } else if (event === "files") {
+            setSession((prev) => ({
+              ...prev,
+              files: data.files ?? prev.files,
+              previewUrl:
+                data.previewUrl === undefined
+                  ? prev.previewUrl
+                  : data.previewUrl,
+            }));
+          } else if (event === "done" && data.session) {
+            completed = true;
+            applySession(data.session);
+            setDraft(null);
+          } else if (event === "error") {
+            if (controller.signal.aborted) return;
+            toast({
+              body: data.message || "生成失败",
+              type: "error",
+              uniqueID: "send-message-err",
+            });
+          }
+        },
+        controller.signal
       );
-      setSession(updated);
-      setProjects((prev) =>
-        prev.map((project) =>
-          project.id === updated.projectId
-            ? {
-                ...project,
-                sessions: project.sessions.map((item) =>
-                  item.id === updated.id
-                    ? {
-                        ...item,
-                        title: updated.title,
-                        updatedAt: updated.updatedAt,
-                      }
-                    : item
-                ),
-              }
-            : project
-        )
-      );
-      return true;
+      if (!completed) {
+        await refreshAfterRun(controller.signal.aborted);
+      }
+      return completed;
     } catch (error) {
-      toast({
-        body: error instanceof Error ? error.message : "发送消息失败",
-        type: "error",
-        uniqueID: "send-message-err",
-      });
+      const aborted = controller.signal.aborted || isAbortError(error);
+      const refreshed = await refreshAfterRun(aborted);
+      if (!refreshed && !aborted) setSession(snapshot);
+      if (!aborted) {
+        toast({
+          body: error instanceof Error ? error.message : "发送消息失败",
+          type: "error",
+          uniqueID: "send-message-err",
+        });
+      }
       return false;
     } finally {
-      setSending(false);
+      if (abortRef.current === controller) abortRef.current = null;
+      setDraft(null);
     }
+  }
+
+  async function drain(input: {
+    content?: string;
+    continueExisting?: boolean;
+    modelId?: string | null;
+  }) {
+    let current: {
+      content?: string;
+      continueExisting?: boolean;
+      modelId?: string | null;
+    } | null = input;
+    while (current && !stopQueueRef.current) {
+      await runAgent(current);
+      if (stopQueueRef.current) break;
+      const next = queueRef.current[0];
+      if (!next) break;
+      syncQueue(queueRef.current.slice(1));
+      current = { content: next.content, modelId: next.modelId };
+    }
+    stopQueueRef.current = false;
+  }
+
+  function startRun(input: {
+    content?: string;
+    continueExisting?: boolean;
+    modelId?: string | null;
+  }) {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    stopQueueRef.current = false;
+    setSending(true);
+    void drain(input).finally(() => {
+      runningRef.current = false;
+      setSending(false);
+      setDraft(null);
+    });
+  }
+
+  function handleQueue(content: string) {
+    const text = content.trim();
+    if (!text) return;
+    if (!runningRef.current) {
+      startRun({ content: text, modelId: selectedModelId });
+      return;
+    }
+    syncQueue([
+      ...queueRef.current,
+      { id: nextQueueId(), content: text, modelId: selectedModelId },
+    ]);
+  }
+
+  function handleSendQueued(id: string) {
+    const item = queueRef.current.find((entry) => entry.id === id);
+    if (!item) return;
+    const rest = queueRef.current.filter((entry) => entry.id !== id);
+    if (!runningRef.current) {
+      syncQueue(rest);
+      startRun({ content: item.content, modelId: item.modelId });
+      return;
+    }
+    stopQueueRef.current = false;
+    syncQueue([item, ...rest]);
+    abortRef.current?.abort();
+  }
+
+  function handleCancel() {
+    if (!runningRef.current) return;
+    stopQueueRef.current = true;
+    syncQueue([]);
+    abortRef.current?.abort();
+  }
+
+  function handleRemoveQueued(id: string) {
+    syncQueue(queueRef.current.filter((item) => item.id !== id));
+  }
+
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    const last = initialSession.messages.at(-1);
+    if (!last || last.role !== "user") return;
+    if (initialSession.messages.some((message) => message.role === "assistant")) {
+      return;
+    }
+    autoRanRef.current = true;
+    startRun({ continueExisting: true, modelId: selectedModelId });
+    // The first prompt is already stored on the session. Run it once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSession.id]);
+
+  function handleSend(value: string) {
+    const text = value.trim();
+    if (!text) return;
+    if (runningRef.current) {
+      handleQueue(text);
+      return;
+    }
+    startRun({ content: text, modelId: selectedModelId });
   }
 
   return (
@@ -1185,6 +1389,12 @@ export function ChatSessionView({
                   ref={chatScrollRef}
                   density="balanced"
                   style={chatLayoutStyle}
+                  scrollButton={
+                    <ChatLayoutScrollButton
+                      isVisible={isAwayFromBottom}
+                      onClick={scrollMessagesToBottom}
+                    />
+                  }
                   emptyState={
                     <EmptyState
                       title="开始新会话"
@@ -1194,47 +1404,53 @@ export function ChatSessionView({
                   composer={
                     <AgentChatComposer
                       onSubmit={handleSend}
-                      isDisabled={sending}
+                      isRunning={sending}
+                      queue={queue}
+                      onStop={handleCancel}
+                      onQueue={handleQueue}
+                      onSendQueued={handleSendQueued}
+                      onRemoveQueued={handleRemoveQueued}
                       models={initialModels}
                       selectedModelId={selectedModelId}
                       onSelectModel={setSelectedModelId}
+                      projectId={session.projectId}
                     />
                   }
                 >
-                  {session.messages.length > 0 && (
+                  {(session.messages.length > 0 || draft) && (
                     <ChatMessageList>
-                      <ChatSystemMessage variant="divider">
-                        Today
-                      </ChatSystemMessage>
-
-                      {session.messages.map((message) => (
-                        <Fragment key={message.id}>
-                          {message.role === "user" ? (
-                            <ChatMessage sender="user">
-                              <ChatMessageBubble
-                                metadata={
-                                  <ChatMessageMetadata
-                                    timestamp={
-                                      <Timestamp
-                                        value={message.createdAt}
-                                        format="time"
-                                      />
-                                    }
-                                    status="delivered"
-                                  />
-                                }
-                              >
-                                {message.content}
-                              </ChatMessageBubble>
-                            </ChatMessage>
-                          ) : (
-                            <FullAIChatExchange
-                              timestamp={message.createdAt}
-                              onOpenArtifact={() => openPanel("preview")}
-                            />
-                          )}
-                        </Fragment>
-                      ))}
+                      {session.messages.map((message) =>
+                        message.role === "user" ? (
+                          <ChatMessage key={message.id} sender="user">
+                            <ChatMessageBubble
+                              metadata={
+                                <MessageHoverBar
+                                  text={message.content}
+                                  timestamp={message.createdAt}
+                                />
+                              }
+                            >
+                              {message.content}
+                            </ChatMessageBubble>
+                          </ChatMessage>
+                        ) : (
+                          <AssistantMessageView
+                            key={message.id}
+                            content={message.content}
+                            parts={message.parts}
+                            timestamp={message.createdAt}
+                            icon={message.modelIcon ?? fallbackModelIcon}
+                          />
+                        )
+                      )}
+                      {draft ? (
+                        <AssistantMessageView
+                          isLive
+                          icon={draft.icon}
+                          content=""
+                          parts={draft.parts}
+                        />
+                      ) : null}
                     </ChatMessageList>
                   )}
                 </ChatLayout>
@@ -1268,11 +1484,13 @@ export function ChatSessionView({
               >
                 <IdePreviewPanel
                   storageScopeKey={session.projectId ?? session.id}
+                  projectId={session.projectId}
                   title={session.title}
                   projectName={activeProjectName}
                   files={session.files}
-                  tabRequest={tabRequest}
+                  devServerUrl={session.previewUrl}
                   initialTabs={initialWorkspaceTabs}
+                  onWorkspaceChange={applyWorkspace}
                   leadingAction={
                     !isChatOpen ? (
                       <Button
@@ -1314,11 +1532,13 @@ export function ChatSessionView({
             <LayoutContent padding={0}>
               <IdePreviewPanel
                 storageScopeKey={session.projectId ?? session.id}
+                projectId={session.projectId}
                 title={session.title}
                 projectName={activeProjectName}
                 files={session.files}
-                tabRequest={tabRequest}
+                devServerUrl={session.previewUrl}
                 initialTabs={initialWorkspaceTabs}
+                onWorkspaceChange={applyWorkspace}
               />
             </LayoutContent>
           }

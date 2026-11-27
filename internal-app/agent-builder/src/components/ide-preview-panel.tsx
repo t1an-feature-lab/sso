@@ -11,9 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
@@ -39,17 +37,21 @@ import { useClipboard } from "@astryxdesign/core/hooks";
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CircleStackIcon,
   ClipboardDocumentIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
   CommandLineIcon,
+  DevicePhoneMobileIcon,
   DocumentTextIcon,
   EyeIcon,
   FolderIcon,
-  GlobeAltIcon,
   MagnifyingGlassIcon,
   PlusIcon,
+  PowerIcon,
   RocketLaunchIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
@@ -64,6 +66,9 @@ import {
   type WorkspacePanelTab,
   type WorkspaceTabInstance,
 } from "@/lib/workspace-tabs-prefs";
+import { apiClient } from "@/lib/api-client";
+import { overlayScrollbarMarkup } from "@/lib/overlay-scrollbar";
+import { WorkspaceFileTree } from "@/components/workspace-file-tree";
 import { createZipBlob } from "@/lib/zip";
 import type { ProjectFile } from "@/lib/types";
 import "./ide-preview-panel.css";
@@ -151,24 +156,6 @@ function getTabLabel(tab: WorkspaceTabInstance): string {
   return `${base} ${tab.index}`;
 }
 
-const DEMO_DATABASE_TABLES = [
-  {
-    name: "app_records",
-    rows: 12,
-    columns: [
-      "id (uuid)",
-      "title (text)",
-      "status (varchar)",
-      "created_at (timestamptz)",
-    ],
-  },
-  {
-    name: "app_settings",
-    rows: 3,
-    columns: ["key (varchar)", "value (jsonb)", "updated_at (timestamptz)"],
-  },
-];
-
 const styles: Record<string, CSSProperties> = {
   root: {
     display: "flex",
@@ -196,11 +183,15 @@ const styles: Record<string, CSSProperties> = {
     padding: 12,
     minWidth: 0,
     height: "100%",
-    overflowY: "auto",
+    minHeight: 0,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   },
   editorArea: {
     overflow: "auto",
     minHeight: 0,
+    position: "relative",
   },
   previewFrame: {
     flex: 1,
@@ -298,7 +289,52 @@ function buildPreviewHtml(files: ProjectFile[]): string {
     }
   }
 
-  return doc;
+  const scrollFix = overlayScrollbarMarkup();
+  if (doc.includes("</head>")) {
+    return doc.replace("</head>", `${scrollFix}</head>`);
+  }
+  return `${scrollFix}${doc}`;
+}
+
+function splitPreviewTarget(value: string | null | undefined): {
+  origin: string | null;
+  path: string;
+} {
+  if (!value || !/^https?:\/\//i.test(value)) {
+    return { origin: null, path: "/" };
+  }
+  try {
+    const url = new URL(value);
+    return {
+      origin: url.origin,
+      path: `${url.pathname}${url.search}${url.hash}` || "/",
+    };
+  } catch {
+    return { origin: null, path: "/" };
+  }
+}
+
+function normalizePreviewPath(input: string, origin: string | null): string {
+  const trimmed = input.trim();
+  if (!trimmed) return "/";
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      return `${url.pathname}${url.search}${url.hash}` || "/";
+    } catch {
+      return "/";
+    }
+  }
+  const withSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (withSlash.startsWith("//")) return "/";
+  if (!origin) return withSlash;
+  try {
+    const url = new URL(withSlash, origin);
+    if (url.origin !== origin) return "/";
+    return `${url.pathname}${url.search}${url.hash}` || "/";
+  } catch {
+    return "/";
+  }
 }
 
 function toSafeSlug(text: string): string {
@@ -311,20 +347,29 @@ function toSafeSlug(text: string): string {
 
 export function IdePreviewPanel({
   storageScopeKey,
+  projectId,
   title,
   projectName,
   files,
+  devServerUrl,
   tabRequest,
   initialTabs = DEFAULT_PERSISTED_TABS,
   leadingAction,
+  onWorkspaceChange,
 }: {
   storageScopeKey?: string;
+  projectId?: string | null;
   title: string;
   projectName?: string | null;
   files: ProjectFile[];
+  devServerUrl?: string | null;
   tabRequest?: WorkspaceTabRequest | null;
   initialTabs?: PersistedWorkspaceTabs;
   leadingAction?: ReactNode;
+  onWorkspaceChange?: (update: {
+    files: ProjectFile[];
+    previewUrl: string | null;
+  }) => void;
 }) {
   const toast = useAppToast();
   const { copy } = useClipboard({ announce: "已复制" });
@@ -348,11 +393,59 @@ export function IdePreviewPanel({
   const [fileQueryByTab, setFileQueryByTab] = useState<Record<string, string>>(
     {}
   );
+  const [previewBoot] = useState(() => splitPreviewTarget(devServerUrl));
   const [previewKey, setPreviewKey] = useState(0);
-  const [previewUrlInput, setPreviewUrlInput] = useState("/");
-  const [activePreviewUrl, setActivePreviewUrl] = useState("/");
+  const [previewOrigin, setPreviewOrigin] = useState<string | null>(
+    previewBoot.origin
+  );
+  const [previewPath, setPreviewPath] = useState(previewBoot.path);
+  const [pathDraft, setPathDraft] = useState(previewBoot.path);
+  const [pathHistory, setPathHistory] = useState<string[]>([previewBoot.path]);
+  const [pathIndex, setPathIndex] = useState(0);
+  const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
+  const [frameOrigin, setFrameOrigin] = useState<string | null>(null);
+  const [serverPhase, setServerPhase] = useState<
+    "running" | "stopped" | "starting" | "stopping"
+  >(previewBoot.origin ? "running" : "stopped");
+  const [terminalRunning, setTerminalRunning] = useState(false);
+  const serverPhaseRef = useRef(serverPhase);
+  serverPhaseRef.current = serverPhase;
+  const previewOriginRef = useRef(previewOrigin);
+  previewOriginRef.current = previewOrigin;
+  const seenLiveRef = useRef(previewBoot.origin !== null);
+  const previewEpoch = useRef(0);
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const onWorkspaceChangeRef = useRef(onWorkspaceChange);
+  onWorkspaceChangeRef.current = onWorkspaceChange;
+  const devServerUrlRef = useRef(devServerUrl);
+  devServerUrlRef.current = devServerUrl;
 
-  const isExternalPreviewUrl = /^https?:\/\//i.test(activePreviewUrl);
+  useEffect(() => {
+    previewEpoch.current += 1;
+    const next = splitPreviewTarget(devServerUrl);
+    if (!next.origin) {
+      if (
+        serverPhaseRef.current === "starting" ||
+        serverPhaseRef.current === "stopping"
+      ) {
+        return;
+      }
+      setPreviewOrigin(null);
+      setServerPhase("stopped");
+      return;
+    }
+    const originChanged = previewOriginRef.current !== next.origin;
+    seenLiveRef.current = true;
+    setPreviewOrigin(next.origin);
+    setServerPhase("running");
+    if (!originChanged) return;
+    setPreviewPath("/");
+    setPathDraft("/");
+    setPathHistory(["/"]);
+    setPathIndex(0);
+    setPreviewKey((key) => key + 1);
+  }, [devServerUrl]);
 
   // Per-terminal tab state
   const [terminalInputByTab, setTerminalInputByTab] = useState<
@@ -378,6 +471,78 @@ export function IdePreviewPanel({
     () => openTabs.find((item) => item.id === activeTabId) ?? null,
     [openTabs, activeTabId]
   );
+
+  useEffect(() => {
+    if (!projectId || activeTabInstance?.type !== "preview") return;
+    const epoch = previewEpoch.current;
+    let cancelled = false;
+    apiClient
+      .getPreviewServer(projectId)
+      .then((status) => {
+        if (cancelled || epoch !== previewEpoch.current) return;
+        if (
+          serverPhaseRef.current === "starting" ||
+          serverPhaseRef.current === "stopping"
+        ) {
+          return;
+        }
+        if (status.running && status.previewUrl) {
+          const next = splitPreviewTarget(status.previewUrl);
+          seenLiveRef.current = true;
+          setPreviewOrigin(next.origin);
+          setServerPhase("running");
+          if (status.previewUrl !== devServerUrlRef.current) {
+            onWorkspaceChangeRef.current?.({
+              files: filesRef.current,
+              previewUrl: status.previewUrl,
+            });
+          }
+          return;
+        }
+        setPreviewOrigin(null);
+        setServerPhase("stopped");
+        if (devServerUrlRef.current) {
+          onWorkspaceChangeRef.current?.({
+            files: filesRef.current,
+            previewUrl: null,
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, activeTabInstance?.type]);
+
+  useEffect(() => {
+    if (!projectId || !previewOrigin || serverPhase !== "running") {
+      setFrameOrigin(null);
+      return;
+    }
+    let cancelled = false;
+    apiClient
+      .ensurePreviewFrame(projectId, previewOrigin)
+      .then(async (result) => {
+        if (cancelled) return;
+        try {
+          await fetch(`${result.origin}/__ab_overlay.js`, {
+            mode: "no-cors",
+            cache: "no-store",
+          });
+          if (!cancelled) setFrameOrigin(result.origin);
+        } catch {
+          if (!cancelled) setFrameOrigin(previewOrigin);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFrameOrigin(previewOrigin);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, previewOrigin, serverPhase]);
+
+  const liveFrameOrigin = projectId ? frameOrigin : previewOrigin;
 
   const hasPreviewTab = useMemo(
     () => openTabs.some((tab) => tab.type === "preview"),
@@ -440,24 +605,29 @@ export function IdePreviewPanel({
   }, [tabRequest, openOrFocusTab]);
 
   const currentTabId = activeTabInstance?.id ?? "";
-  const selectedPath = selectedPathByTab[currentTabId] ?? files[0]?.path ?? "";
+  const selectedPath = selectedPathByTab[currentTabId] ?? "";
   const fileQuery = fileQueryByTab[currentTabId] ?? "";
+  const [openedByPath, setOpenedByPath] = useState<Record<string, ProjectFile>>(
+    {}
+  );
+  const fileTreeRevision = useMemo(
+    () => files.map((file) => file.path).join("\n"),
+    [files]
+  );
   const terminalInput = terminalInputByTab[currentTabId] ?? "";
   const defaultTerminalBanner = useMemo(
-    () => [
-      files.length > 0
-        ? `$ agent-builder dev\n▲ Ready — ${files.length} 个工作空间文件已加载\n`
-        : `$ agent-builder dev\n▲ 工作空间已就绪，等待生成项目文件\n`,
-    ],
-    [files.length]
+    () => ["工作空间终端已连接到当前 Project\n"],
+    []
   );
   const terminalEntries =
     terminalEntriesByTab[currentTabId] ?? defaultTerminalBanner;
 
-  const activeFile = useMemo(
-    () => files.find((f) => f.path === selectedPath) ?? files[0] ?? null,
-    [files, selectedPath]
-  );
+  const activeFile = useMemo(() => {
+    if (selectedPath && openedByPath[selectedPath]) {
+      return openedByPath[selectedPath];
+    }
+    return files.find((file) => file.path === selectedPath) ?? null;
+  }, [files, openedByPath, selectedPath]);
 
   const fileTree = useMemo(
     () =>
@@ -485,16 +655,61 @@ export function IdePreviewPanel({
     }
   }, [terminalEntries, currentTabId]);
 
-  function handleApplyPreviewUrl() {
-    const trimmed = previewUrlInput.trim();
-    const nextUrl = trimmed
-      ? /^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")
-        ? trimmed
-        : `/${trimmed}`
-      : "/";
-    setPreviewUrlInput(nextUrl);
-    setActivePreviewUrl(nextUrl);
-    setPreviewKey((k) => k + 1);
+  function commitPreviewPath(raw: string) {
+    const next = normalizePreviewPath(raw, previewOrigin);
+    const base = pathHistory.slice(0, pathIndex + 1);
+    const history = base[base.length - 1] === next ? base : [...base, next];
+    setPathDraft(next);
+    setPreviewPath(next);
+    setPathHistory(history);
+    setPathIndex(history.length - 1);
+    if (next !== previewPath) setPreviewKey((key) => key + 1);
+  }
+
+  function travelPreview(nextIndex: number) {
+    const next = pathHistory[nextIndex];
+    if (!next) return;
+    setPathIndex(nextIndex);
+    setPreviewPath(next);
+    setPathDraft(next);
+    setPreviewKey((key) => key + 1);
+  }
+
+  function openPreviewExternal() {
+    if (!previewOrigin || serverPhase !== "running") return;
+    const path = normalizePreviewPath(previewPath, previewOrigin);
+    window.open(`${previewOrigin}${path}`, "_blank", "noopener,noreferrer");
+  }
+
+  async function togglePreviewServer() {
+    if (!projectId || serverPhase === "starting" || serverPhase === "stopping") {
+      return;
+    }
+    const action = serverPhase === "running" ? "stop" : "start";
+    previewEpoch.current += 1;
+    setServerPhase(action === "start" ? "starting" : "stopping");
+    try {
+      const status = await apiClient.controlPreviewServer(projectId, action);
+      const next = splitPreviewTarget(status.previewUrl);
+      if (status.running) seenLiveRef.current = true;
+      setPreviewOrigin(next.origin);
+      setServerPhase(status.running ? "running" : "stopped");
+      if (status.running) {
+        setPreviewPath("/");
+        setPathDraft("/");
+        setPathHistory(["/"]);
+        setPathIndex(0);
+        setPreviewKey((key) => key + 1);
+      }
+      onWorkspaceChange?.({ files, previewUrl: status.previewUrl });
+    } catch (error) {
+      setServerPhase(action === "start" ? "stopped" : "running");
+      toast({
+        body: error instanceof Error ? error.message : "预览服务操作失败",
+        type: "error",
+        uniqueID: "preview-server",
+      });
+    }
   }
 
   function handleActivateTab(tab: WorkspaceTabInstance) {
@@ -577,8 +792,8 @@ export function IdePreviewPanel({
     }, 350);
   }
 
-  function handleRunTerminalCommand() {
-    if (!currentTabId) return;
+  async function handleRunTerminalCommand() {
+    if (!currentTabId || terminalRunning) return;
     const cmd = terminalInput.trim();
     setTerminalInputByTab((prev) => ({ ...prev, [currentTabId]: "" }));
     if (!cmd) return;
@@ -588,27 +803,36 @@ export function IdePreviewPanel({
       return;
     }
 
-    let response = "";
-    if (cmd === "help") {
-      response = "可用命令：ls、status、clear、help";
-    } else if (cmd === "ls") {
-      response =
-        files.length > 0
-          ? files.map((file) => file.path).join("\n")
-          : "(空工作空间)";
-    } else if (cmd === "status") {
-      response = `Project：${projectName ?? title}\n文件数：${files.length}\n预览状态：${files.length > 0 ? "就绪" : "空白"}`;
-    } else {
-      response = `已执行：${cmd}`;
+    const tabId = currentTabId;
+    const appendEntry = (entry: string) => {
+      setTerminalEntriesByTab((prev) => ({
+        ...prev,
+        [tabId]: [...(prev[tabId] ?? defaultTerminalBanner), entry],
+      }));
+    };
+
+    if (!projectId) {
+      appendEntry(`$ ${cmd}\n当前会话没有 Project\n`);
+      return;
     }
 
-    setTerminalEntriesByTab((prev) => ({
-      ...prev,
-      [currentTabId]: [
-        ...(prev[currentTabId] ?? defaultTerminalBanner),
-        `$ ${cmd}\n${response}\n`,
-      ],
-    }));
+    appendEntry(`$ ${cmd}\n`);
+    setTerminalRunning(true);
+    try {
+      const { result, files: nextFiles, previewUrl } =
+        await apiClient.runProjectCommand(projectId, cmd);
+      const output =
+        result.output.trim() ||
+        (result.status === "running" ? "进程已在后台运行" : "");
+      if (output) appendEntry(`${output}\n`);
+      onWorkspaceChange?.({ files: nextFiles, previewUrl });
+    } catch (error) {
+      appendEntry(
+        `${error instanceof Error ? error.message : "命令执行失败"}\n`
+      );
+    } finally {
+      setTerminalRunning(false);
+    }
   }
 
   function handleTerminalKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -619,7 +843,7 @@ export function IdePreviewPanel({
   }
 
   return (
-    <div style={styles.root}>
+    <div className="v0-workspace" style={styles.root}>
       <div className="v0-header-bar" role="toolbar" aria-label="工作空间标签栏">
         <div className="v0-header-start">
           {leadingAction}
@@ -646,8 +870,18 @@ export function IdePreviewPanel({
                 >
                   {tab.type === "preview" ? (
                     <StatusDot
-                      variant={files.length > 0 ? "success" : "neutral"}
-                      label={files.length > 0 ? "预览就绪" : "暂无预览"}
+                      variant={
+                        serverPhase === "running" || (!projectId && files.length > 0)
+                          ? "success"
+                          : "neutral"
+                      }
+                      label={
+                        serverPhase === "running"
+                          ? "运行中"
+                          : !projectId && files.length > 0
+                            ? "预览就绪"
+                            : "未运行"
+                      }
                     />
                   ) : (
                     <Icon icon={meta.icon} size="sm" />
@@ -743,7 +977,7 @@ export function IdePreviewPanel({
             />
           </div>
         ) : activeTabInstance.type === "preview" ? (
-          files.length === 0 && !isExternalPreviewUrl ? (
+          !projectId && files.length === 0 && !previewOrigin ? (
             <div style={styles.emptyCenter}>
               <EmptyState
                 title="暂无预览内容"
@@ -752,52 +986,162 @@ export function IdePreviewPanel({
             </div>
           ) : (
             <>
-              <div className="v0-preview-bar">
-                <Button
-                  label="刷新预览"
-                  variant="ghost"
-                  size="sm"
-                  icon={<Icon icon={ArrowPathIcon} size="sm" />}
-                  isIconOnly
-                  onClick={handleApplyPreviewUrl}
-                />
-                <TextInput
-                  type="url"
-                  label="预览地址"
-                  isLabelHidden
-                  size="sm"
-                  startIcon={
-                    <Icon icon={GlobeAltIcon} size="sm" color="secondary" />
+              <div className="v0-preview-bar" role="toolbar" aria-label="预览工具栏">
+                <button
+                  type="button"
+                  className="v0-preview-icon"
+                  aria-label="后退"
+                  disabled={pathIndex <= 0}
+                  onClick={() => travelPreview(pathIndex - 1)}
+                >
+                  <Icon icon={ChevronLeftIcon} size="sm" />
+                </button>
+                <button
+                  type="button"
+                  className="v0-preview-icon"
+                  aria-label="前进"
+                  disabled={pathIndex >= pathHistory.length - 1}
+                  onClick={() => travelPreview(pathIndex + 1)}
+                >
+                  <Icon icon={ChevronRightIcon} size="sm" />
+                </button>
+                <button
+                  type="button"
+                  className="v0-preview-icon"
+                  aria-label={viewport === "mobile" ? "切换到桌面预览" : "切换到手机预览"}
+                  aria-pressed={viewport === "mobile"}
+                  data-active={viewport === "mobile" ? "true" : "false"}
+                  onClick={() =>
+                    setViewport((value) => (value === "mobile" ? "desktop" : "mobile"))
                   }
-                  value={previewUrlInput}
-                  onChange={setPreviewUrlInput}
-                  onEnter={handleApplyPreviewUrl}
-                  placeholder="输入路径或 URL，例如 / 或 https://example.com"
-                  width="100%"
-                  containerStyle={{ flex: 1, minWidth: 0 }}
-                />
+                >
+                  <Icon icon={DevicePhoneMobileIcon} size="sm" />
+                </button>
+                <form
+                  className="v0-preview-path"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    commitPreviewPath(pathDraft);
+                  }}
+                >
+                  <input
+                    className="v0-preview-path-input"
+                    aria-label="预览路径"
+                    value={pathDraft}
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    onChange={(event) => setPathDraft(event.target.value)}
+                    onBlur={() => {
+                      if (pathDraft !== previewPath) commitPreviewPath(pathDraft);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setPathDraft(previewPath);
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                </form>
+                <button
+                  type="button"
+                  className="v0-preview-icon"
+                  aria-label="在新标签页打开"
+                  disabled={!previewOrigin || serverPhase !== "running"}
+                  onClick={openPreviewExternal}
+                >
+                  <Icon icon={ArrowTopRightOnSquareIcon} size="sm" />
+                </button>
+                <button
+                  type="button"
+                  className="v0-preview-icon"
+                  aria-label="刷新预览"
+                  onClick={() => setPreviewKey((key) => key + 1)}
+                >
+                  <Icon icon={ArrowPathIcon} size="sm" />
+                </button>
+                {projectId ? (
+                  <div className="v0-preview-status">
+                    <StatusDot
+                      variant={serverPhase === "running" ? "success" : "neutral"}
+                      label={
+                        serverPhase === "running"
+                          ? "Running"
+                          : serverPhase === "starting"
+                            ? "Starting"
+                            : serverPhase === "stopping"
+                              ? "Stopping"
+                              : "Stopped"
+                      }
+                    />
+                    <span className="v0-preview-status-label">
+                      {serverPhase === "running"
+                        ? "Running"
+                        : serverPhase === "starting"
+                          ? "Starting"
+                          : serverPhase === "stopping"
+                            ? "Stopping"
+                            : "Stopped"}
+                    </span>
+                    <button
+                      type="button"
+                      className="v0-preview-power"
+                      aria-label={
+                        serverPhase === "running" ? "停止开发服务" : "启动开发服务"
+                      }
+                      disabled={
+                        serverPhase === "starting" || serverPhase === "stopping"
+                      }
+                      onClick={() => void togglePreviewServer()}
+                    >
+                      <Icon icon={PowerIcon} size="sm" />
+                    </button>
+                  </div>
+                ) : null}
               </div>
-              {isExternalPreviewUrl ? (
-                <iframe
-                  key={`${previewKey}-${activePreviewUrl}`}
-                  title={`预览：${activePreviewUrl}`}
-                  sandbox="allow-scripts allow-same-origin allow-forms"
-                  src={activePreviewUrl}
-                  style={styles.previewFrame}
-                />
-              ) : (
-                <iframe
-                  key={previewKey}
-                  title={`预览：${title}`}
-                  sandbox="allow-scripts"
-                  srcDoc={previewDoc}
-                  style={styles.previewFrame}
-                />
-              )}
+              <div className="v0-preview-stage" data-device={viewport}>
+                <div className="v0-preview-device">
+                  {previewOrigin && serverPhase === "running" ? (
+                    liveFrameOrigin ? (
+                      <iframe
+                        key={`${previewKey}-${liveFrameOrigin}${previewPath}`}
+                        className="v0-preview-iframe"
+                        title={`预览：${previewPath}`}
+                        sandbox="allow-scripts allow-same-origin allow-forms"
+                        src={`${liveFrameOrigin}${previewPath.startsWith("/") ? previewPath : `/${previewPath}`}`}
+                        style={styles.previewFrame}
+                      />
+                    ) : null
+                  ) : files.length > 0 &&
+                    serverPhase !== "starting" &&
+                    serverPhase !== "stopping" &&
+                    !seenLiveRef.current ? (
+                    <iframe
+                      key={previewKey}
+                      className="v0-preview-iframe"
+                      title={`预览：${title}`}
+                      sandbox="allow-scripts"
+                      srcDoc={previewDoc}
+                      style={styles.previewFrame}
+                    />
+                  ) : (
+                    <div className="v0-preview-paused">
+                      <Text color="secondary">
+                        {serverPhase === "starting"
+                          ? "正在启动开发服务"
+                          : serverPhase === "stopping"
+                            ? "正在停止开发服务"
+                            : "开发服务未运行"}
+                      </Text>
+                    </div>
+                  )}
+                  <div className="v0-preview-shield" aria-hidden="true" />
+                </div>
+              </div>
             </>
           )
         ) : activeTabInstance.type === "code" ? (
-          files.length === 0 ? (
+          !projectId && files.length === 0 ? (
             <div style={styles.emptyCenter}>
               <EmptyState
                 title="暂无代码文件"
@@ -836,7 +1180,31 @@ export function IdePreviewPanel({
                           startIcon={MagnifyingGlassIcon}
                           hasClear
                         />
-                        <TreeList items={fileTree} density="compact" />
+                        <div style={{ flex: 1, minHeight: 0 }}>
+                          {projectId ? (
+                            <WorkspaceFileTree
+                              projectId={projectId}
+                              revision={fileTreeRevision}
+                              query={fileQuery}
+                              selectedPath={selectedPath}
+                              onOpenFile={(file) => {
+                                if (!currentTabId) return;
+                                setSelectedPathByTab((prev) => ({
+                                  ...prev,
+                                  [currentTabId]: file.path,
+                                }));
+                                setOpenedByPath((prev) => ({
+                                  ...prev,
+                                  [file.path]: file,
+                                }));
+                              }}
+                            />
+                          ) : (
+                            <div style={{ height: "100%", overflowY: "auto" }}>
+                              <TreeList items={fileTree} density="compact" />
+                            </div>
+                          )}
+                        </div>
                       </Stack>
                     </LayoutPanel>
                   )}
@@ -885,9 +1253,9 @@ export function IdePreviewPanel({
                           }}
                         />
                       ) : (
-                        <Stack padding={4}>
+                        <div className="v0-code-empty">
                           <Text color="secondary">请选择左侧文件查看代码</Text>
-                        </Stack>
+                        </div>
                       )}
                     </StackItem>
                   </Stack>
@@ -896,59 +1264,12 @@ export function IdePreviewPanel({
             />
           )
         ) : activeTabInstance.type === "database" ? (
-          files.length === 0 ? (
-            <div style={styles.emptyCenter}>
-              <EmptyState
-                title="暂无数据表"
-                description="在左侧对话中描述数据结构后，可在此查看表结构与记录"
-              />
-            </div>
-          ) : (
-            <div style={styles.scrollContainer}>
-              <VStack gap={4}>
-                <HStack hAlign="between" vAlign="center">
-                  <VStack gap={0.5}>
-                    <Text type="label" weight="semibold">
-                      Database 工作空间
-                    </Text>
-                    <Text type="supporting" color="secondary">
-                      PostgreSQL · {projectName ?? title}
-                    </Text>
-                  </VStack>
-                  <Badge label="已连接" variant="green" />
-                </HStack>
-
-                <VStack gap={3}>
-                  {DEMO_DATABASE_TABLES.map((table) => (
-                    <Card key={table.name} variant="muted" padding={3}>
-                      <VStack gap={2}>
-                        <HStack hAlign="between" vAlign="center">
-                          <HStack gap={2} vAlign="center">
-                            <Icon
-                              icon={CircleStackIcon}
-                              size="sm"
-                              color="secondary"
-                            />
-                            <Text type="label" weight="semibold">
-                              {table.name}
-                            </Text>
-                          </HStack>
-                          <Text type="supporting" color="secondary">
-                            {table.rows} 条记录
-                          </Text>
-                        </HStack>
-                        <HStack gap={1.5} wrap="wrap">
-                          {table.columns.map((col) => (
-                            <Badge key={col} label={col} variant="gray" />
-                          ))}
-                        </HStack>
-                      </VStack>
-                    </Card>
-                  ))}
-                </VStack>
-              </VStack>
-            </div>
-          )
+          <div style={styles.emptyCenter}>
+            <EmptyState
+              title="暂无数据表"
+              description="当前 Project 还没有可查看的数据表"
+            />
+          </div>
         ) : activeTabInstance.type === "settings" ? (
           <WorkspaceSettingsPanel
             scopeKey={storageScopeKey ?? workspaceSlug}
@@ -989,6 +1310,7 @@ export function IdePreviewPanel({
                 type="text"
                 className="v0-terminal-input"
                 value={terminalInput}
+                disabled={terminalRunning}
                 onChange={(event) => {
                   if (!currentTabId) return;
                   setTerminalInputByTab((prev) => ({
@@ -997,7 +1319,7 @@ export function IdePreviewPanel({
                   }));
                 }}
                 onKeyDown={handleTerminalKeyDown}
-                placeholder="输入命令后按 Enter（例如 ls、status、clear）"
+                placeholder="输入命令后按 Enter，clear 清空输出"
                 aria-label="终端命令输入"
               />
             </div>

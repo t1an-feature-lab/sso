@@ -1,21 +1,21 @@
 @layer components {
   .astryx-toast {
-    background-color: var(--color-info-muted);
+    background-color: var(--color-background-blue);
     color: var(--color-on-info-muted);
   }
 
   .astryx-toast:has([data-app-toast-status="success"]) {
-    background-color: var(--color-success-muted);
+    background-color: var(--color-background-green);
     color: var(--color-on-success-muted);
   }
 
   .astryx-toast:has([data-app-toast-status="warning"]) {
-    background-color: var(--color-warning-muted);
+    background-color: var(--color-background-yellow);
     color: var(--color-on-warning-muted);
   }
 
   .astryx-toast[data-type="error"] {
-    background-color: var(--color-error-muted);
+    background-color: var(--color-background-red);
     color: var(--color-on-error-muted);
   }
 

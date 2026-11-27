@@ -80,6 +80,7 @@ model ChatMessage {
   sessionId     String      @map("session_id")
   role          String      @db.VarChar(20)
   content       String      @db.Text
+  parts         Json        @default("[]")
   artifactTitle String?     @map("artifact_title") @db.VarChar(200)
   createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   session       ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)

@@ -19,14 +19,6 @@ import { apiClient } from "@/lib/api-client";
 const pageStyle: CSSProperties = { minHeight: "100%" };
 const composerInputStyle: CSSProperties = { minHeight: 84 };
 
-const DEFAULT_ATTACHMENTS = [
-  "project_brief.pdf",
-  "wireframes_v2.fig",
-  "api_spec.yaml",
-  "user_research.csv",
-  "brand_guidelines.pdf",
-];
-
 export function ChatLandingView({
   initialProjectId,
 }: {
@@ -107,7 +99,6 @@ export function ChatLandingView({
             <AgentChatComposer
               onSubmit={handleSubmit}
               isDisabled={submitting}
-              defaultAttachments={DEFAULT_ATTACHMENTS}
               inputStyle={composerInputStyle}
               models={models}
               selectedModelId={selectedModelId}
@@ -115,6 +106,7 @@ export function ChatLandingView({
               onSelectModel={(modelId) => void selectDefaultModel(modelId)}
               projects={projects}
               selectedProjectId={selectedProjectId}
+              projectId={selectedProjectId}
               onSelectProject={setSelectedProjectId}
               onCreateProject={openCreateProjectDialog}
             />

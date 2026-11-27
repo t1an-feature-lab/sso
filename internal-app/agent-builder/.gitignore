@@ -34,3 +34,6 @@ next-env.d.ts
 
 # prisma generated
 /src/generated/prisma
+
+# per-project docker workspaces
+/storage

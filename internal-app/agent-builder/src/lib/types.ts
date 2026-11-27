@@ -31,11 +31,48 @@ export interface ProjectFile {
   content: string;
 }
 
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+}
+
+export type ChatToolStatus = "running" | "complete" | "error";
+
+export interface ChatToolPart {
+  type: "tool";
+  id: string;
+  command: string;
+  status: ChatToolStatus;
+  output: string;
+  exitCode: number | null;
+  background: boolean;
+  previewUrl: string | null;
+  startedAt?: string;
+  endedAt?: string | null;
+}
+
+export interface ChatStepPart {
+  type: "step";
+  id: string;
+  label: string;
+  status: ChatToolStatus;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export type ChatMessagePart =
+  | { type: "text"; text: string }
+  | ChatToolPart
+  | ChatStepPart;
+
 export interface ChatMessageDto {
   id: string;
   sessionId: string;
   role: "user" | "assistant";
   content: string;
+  parts: ChatMessagePart[];
+  modelIcon: ModelProviderIconId | null;
   artifactTitle: string | null;
   createdAt: string;
 }
@@ -63,9 +100,25 @@ export interface ChatSessionDetail {
   projectName: string | null;
   title: string;
   files: ProjectFile[];
+  previewUrl: string | null;
   messages: ChatMessageDto[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PreviewServerStatus {
+  running: boolean;
+  previewUrl: string | null;
+}
+
+export interface ProjectCommandResult {
+  status: "exited" | "running";
+  exitCode: number | null;
+  output: string;
+  processId: string | null;
+  pid: number | null;
+  logPath: string | null;
+  previewUrl: string | null;
 }
 
 export type ModelProvider =
@@ -174,6 +227,19 @@ export const MODEL_PROVIDER_ICON_OPTIONS: ModelProviderIconOption[] = [
   { value: "perplexity", label: "Perplexity" },
   { value: "huggingface", label: "Hugging Face" },
 ];
+
+const MODEL_PROVIDER_ICON_IDS = new Set<ModelProviderIconId>(
+  MODEL_PROVIDER_ICON_OPTIONS.map((item) => item.value)
+);
+
+export function isModelProviderIcon(
+  value: unknown
+): value is ModelProviderIconId {
+  return (
+    typeof value === "string" &&
+    MODEL_PROVIDER_ICON_IDS.has(value as ModelProviderIconId)
+  );
+}
 
 export type ModelConfigDto = {
   id: string;
