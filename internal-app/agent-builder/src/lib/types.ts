@@ -61,8 +61,32 @@ export interface ChatStepPart {
   endedAt: string | null;
 }
 
+export const MAX_CHAT_IMAGES = 6;
+export const MAX_CHAT_IMAGE_BYTES = 4 * 1024 * 1024;
+export const VISION_IMAGE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+] as const;
+
+export type ChatImageInput = {
+  name: string;
+  mediaType: string;
+  data: string;
+};
+
+export type ChatImagePart = {
+  type: "image";
+  id: string;
+  mediaType: string;
+  name: string;
+  url: string;
+};
+
 export type ChatMessagePart =
   | { type: "text"; text: string }
+  | ChatImagePart
   | ChatToolPart
   | ChatStepPart;
 

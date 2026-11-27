@@ -15,6 +15,7 @@ import { AgentChatComposer } from "@/components/agent-chat-composer";
 import { useAppToast } from "@/components/app-toast";
 import { useWorkspace } from "@/components/workspace-context";
 import { apiClient } from "@/lib/api-client";
+import type { ChatImageInput } from "@/lib/types";
 
 const pageStyle: CSSProperties = { minHeight: "100%" };
 const composerInputStyle: CSSProperties = { minHeight: 84 };
@@ -47,15 +48,19 @@ export function ChatLandingView({
     }
   }, [initialProjectId, setSelectedProjectId]);
 
-  async function handleSubmit(value: string): Promise<boolean> {
+  async function handleSubmit(
+    value: string,
+    images: ChatImageInput[]
+  ): Promise<boolean> {
     const prompt = value.trim();
-    if (!prompt || submitting) return false;
+    if ((!prompt && images.length === 0) || submitting) return false;
 
     setSubmitting(true);
     try {
       const { session } = await apiClient.createSession(
         prompt,
-        selectedProjectId ?? undefined
+        selectedProjectId ?? undefined,
+        images
       );
       prependSession({
         id: session.id,

@@ -1,5 +1,6 @@
 import type {
   AvailableModelOption,
+  ChatImageInput,
   ChatSessionDetail,
   ChatSessionSummary,
   CreateModelConfigInput,
@@ -272,11 +273,12 @@ export const apiClient = {
 
   createSession(
     prompt?: string,
-    projectId?: string
+    projectId?: string,
+    images: ChatImageInput[] = []
   ): Promise<{ session: ChatSessionDetail }> {
     return request("/api/sessions", {
       method: "POST",
-      body: JSON.stringify({ prompt: prompt ?? "", projectId }),
+      body: JSON.stringify({ prompt: prompt ?? "", projectId, images }),
     });
   },
 
@@ -288,6 +290,7 @@ export const apiClient = {
     sessionId: string,
     input: {
       content?: string;
+      images?: ChatImageInput[];
       modelId?: string | null;
       continueExisting?: boolean;
     },
@@ -300,6 +303,7 @@ export const apiClient = {
         method: "POST",
         body: JSON.stringify({
           content: input.content ?? "",
+          images: input.images ?? [],
           modelId: input.modelId,
           continue: input.continueExisting === true,
         }),

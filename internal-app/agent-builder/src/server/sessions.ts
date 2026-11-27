@@ -12,6 +12,13 @@ import {
 import { db } from "./db";
 import { HttpError } from "./http";
 import {
+  deleteChatImages,
+  imagePartsFromJson,
+  saveChatImages,
+  toChatImagePart,
+  type ParsedChatImage,
+} from "./message-images";
+import {
   destroyProjectSandbox,
   ensureWorkspaceDir,
   listProjectFiles,
@@ -22,13 +29,19 @@ const MOCK_PROJECT_NAMES = ["SSO 认证中心", "营销落地页模板", "数据
 const MOCK_ASSISTANT_PREFIX = "已根据你的需求";
 const purgeTasks = new Map<string, Promise<void>>();
 
-function parseParts(value: Prisma.JsonValue): {
+function parseParts(
+  value: Prisma.JsonValue,
+  message: { id: string; sessionId: string }
+): {
   parts: ChatMessagePart[];
   modelIcon: ModelProviderIconId | null;
 } {
   if (!Array.isArray(value)) return { parts: [], modelIcon: null };
   const parts: ChatMessagePart[] = [];
   let modelIcon: ModelProviderIconId | null = null;
+  for (const image of imagePartsFromJson(value)) {
+    parts.push(toChatImagePart(image, message.sessionId, message.id));
+  }
   for (const item of value) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const record = item as Record<string, Prisma.JsonValue>;
@@ -94,7 +107,7 @@ function toMessageDto(m: {
   artifactTitle: string | null;
   createdAt: Date;
 }): ChatMessageDto {
-  const parsed = parseParts(m.parts);
+  const parsed = parseParts(m.parts, { id: m.id, sessionId: m.sessionId });
   return {
     id: m.id,
     sessionId: m.sessionId,
@@ -371,11 +384,12 @@ export async function getChatSession(
 export async function createChatSession(
   userId: string,
   rawPrompt?: string,
-  rawProjectId?: string
+  rawProjectId?: string,
+  images: ParsedChatImage[] = []
 ): Promise<ChatSessionDetail> {
   const prompt = (rawPrompt ?? "").trim();
   const trimmedProjectId = rawProjectId?.trim();
-  if (!prompt && !trimmedProjectId) {
+  if (!prompt && images.length === 0 && !trimmedProjectId) {
     throw new HttpError(400, "请输入对话内容");
   }
 
@@ -400,8 +414,8 @@ export async function createChatSession(
     }
   }
 
-  const isBlankSession = !prompt;
-  const title = isBlankSession ? "新会话" : deriveTitle(prompt);
+  const isBlankSession = !prompt && images.length === 0;
+  const title = isBlankSession ? "新会话" : deriveTitle(prompt || "图片");
   await ensureWorkspaceDir(userId, targetProject.id);
 
   const created = await db.chatSession.create({
@@ -410,42 +424,36 @@ export async function createChatSession(
       projectId: targetProject.id,
       title,
       files: [],
-      ...(isBlankSession
-        ? {}
-        : {
-            messages: {
-              create: [
-                {
-                  role: "user",
-                  content: prompt,
-                },
-              ],
-            },
-          }),
-    },
-    include: {
-      messages: {
-        orderBy: [{ createdAt: "asc" }],
-      },
     },
   });
+
+  if (!isBlankSession) {
+    const message = await db.chatMessage.create({
+      data: {
+        sessionId: created.id,
+        role: "user",
+        content: prompt || "请查看图片",
+      },
+    });
+    const stored = await saveChatImages(message.id, images);
+    if (stored.length > 0) {
+      await db.chatMessage.update({
+        where: { id: message.id },
+        data: { parts: stored as unknown as Prisma.InputJsonValue },
+      });
+    }
+  }
 
   await db.project.update({
     where: { id: targetProject.id },
     data: { updatedAt: new Date() },
   });
 
-  return {
-    id: created.id,
-    projectId: targetProject.id,
-    projectName: targetProject.name,
-    title: created.title,
-    files: await listProjectFiles(userId, targetProject.id),
-    previewUrl: await readPreviewUrl(targetProject.id),
-    messages: created.messages.map(toMessageDto),
-    createdAt: created.createdAt.toISOString(),
-    updatedAt: created.updatedAt.toISOString(),
-  };
+  const session = await getChatSession(userId, created.id);
+  if (!session) {
+    throw new HttpError(500, "创建对话失败");
+  }
+  return session;
 }
 
 export async function renameChatSession(
@@ -494,10 +502,15 @@ export async function deleteChatSession(
   userId: string,
   sessionId: string
 ): Promise<void> {
+  const messages = await db.chatMessage.findMany({
+    where: { sessionId, session: { userId } },
+    select: { id: true },
+  });
   const deleted = await db.chatSession.deleteMany({
     where: { id: sessionId, userId },
   });
   if (deleted.count === 0) {
     throw new HttpError(404, "对话会话不存在");
   }
+  await Promise.all(messages.map((message) => deleteChatImages(message.id)));
 }

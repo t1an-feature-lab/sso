@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { CHAT_SCROLL_CONTAINER_ID } from "@/lib/chat-panel-prefs";
+import { APP_OVERLAY_SCROLLBAR_SCRIPT } from "@/lib/overlay-scrollbar";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -44,6 +45,9 @@ export default async function RootLayout({
         <Providers initialMode={mode}>{children}</Providers>
         <script
           dangerouslySetInnerHTML={{ __html: CHAT_SCROLL_INIT_SCRIPT }}
+        />
+        <script
+          dangerouslySetInnerHTML={{ __html: APP_OVERLAY_SCROLLBAR_SCRIPT }}
         />
       </body>
     </html>

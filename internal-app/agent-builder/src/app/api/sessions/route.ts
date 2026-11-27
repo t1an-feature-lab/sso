@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/server/auth";
 import { handleApiError, HttpError } from "@/server/http";
+import { parseChatImages } from "@/server/message-images";
 import { createChatSession, listChatSessions } from "@/server/sessions";
 
 export async function GET() {
@@ -19,14 +20,16 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => null)) as {
       prompt?: unknown;
       projectId?: unknown;
+      images?: unknown;
     } | null;
     const prompt = typeof body?.prompt === "string" ? body.prompt : "";
     const projectId =
       typeof body?.projectId === "string" ? body.projectId : undefined;
-    if (!prompt.trim() && !projectId?.trim()) {
+    const images = parseChatImages(body?.images);
+    if (!prompt.trim() && images.length === 0 && !projectId?.trim()) {
       throw new HttpError(400, "请输入对话内容");
     }
-    const session = await createChatSession(user.id, prompt, projectId);
+    const session = await createChatSession(user.id, prompt, projectId, images);
     return NextResponse.json({ session }, { status: 201 });
   } catch (error) {
     return handleApiError(error);

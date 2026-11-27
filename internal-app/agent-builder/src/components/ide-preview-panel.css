@@ -281,7 +281,7 @@
   border: 0;
   border-radius: inherit;
   background: var(--color-surface-default, var(--color-background-surface));
-  scrollbar-width: auto;
+  scrollbar-width: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .v0-preview-device {

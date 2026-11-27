@@ -1,6 +1,7 @@
 import { requireApiUser } from "@/server/auth";
 import { runSessionAgent } from "@/server/agent-run";
 import { HttpError } from "@/server/http";
+import { parseChatImages, type ParsedChatImage } from "@/server/message-images";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ export async function POST(
   let content = "";
   let modelId: string | null = null;
   let continueExisting = false;
+  let images: ParsedChatImage[] = [];
 
   try {
     const user = await requireApiUser();
@@ -25,10 +27,12 @@ export async function POST(
       content?: unknown;
       modelId?: unknown;
       continue?: unknown;
+      images?: unknown;
     } | null;
     content = typeof body?.content === "string" ? body.content : "";
     modelId = typeof body?.modelId === "string" ? body.modelId : null;
     continueExisting = body?.continue === true;
+    images = parseChatImages(body?.images);
   } catch (error) {
     const message = error instanceof HttpError ? error.message : "请先登录";
     const status = error instanceof HttpError ? error.status : 401;
@@ -53,6 +57,7 @@ export async function POST(
           sessionId,
           modelId,
           content,
+          images,
           continueExisting,
           signal: request.signal,
           onEvent: send,

@@ -18,7 +18,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { Selector } from "@astryxdesign/core/Selector";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
-import { Token } from "@astryxdesign/core/Token";
 import { Icon } from "@astryxdesign/core/Icon";
 import {
   DropdownMenu,
@@ -40,7 +39,13 @@ import { useAppToast } from "@/components/app-toast";
 import { ModelProviderIcon } from "@/components/model-provider-icon";
 import { RobotIcon } from "@/components/robot-icon";
 import { apiClient } from "@/lib/api-client";
-import type { AvailableModelOption, WorkspaceEntry } from "@/lib/types";
+import {
+  MAX_CHAT_IMAGE_BYTES,
+  VISION_IMAGE_MIME_TYPES,
+  type AvailableModelOption,
+  type ChatImageInput,
+  type WorkspaceEntry,
+} from "@/lib/types";
 
 const MAX_IMAGE_ATTACHMENTS = 6;
 
@@ -203,9 +208,73 @@ const commandTrigger: ChatComposerTrigger = {
   }),
 };
 
+const VISION_IMAGE_TYPES = new Set<string>(VISION_IMAGE_MIME_TYPES);
+
 interface AttachmentItem {
   id: string;
   name: string;
+  previewUrl: string;
+  image: ChatImageInput;
+}
+
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = typeof reader.result === "string" ? reader.result : "";
+      const data = value.slice(value.indexOf(",") + 1);
+      if (!data) {
+        reject(new Error("图片无法识别"));
+        return;
+      }
+      resolve(data);
+    };
+    reader.onerror = () => reject(new Error("图片无法识别"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function rasterizeImage(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d");
+      if (!canvas.width || !canvas.height || !context) {
+        reject(new Error("图片无法识别"));
+        return;
+      }
+      context.drawImage(image, 0, 0);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("图片无法识别"));
+          return;
+        }
+        resolve(blob);
+      }, "image/png");
+    };
+    image.onerror = () => reject(new Error("图片无法识别"));
+    image.src = url;
+  }).finally(() => {
+    URL.revokeObjectURL(url);
+  });
+}
+
+async function encodeVisionImage(file: File): Promise<ChatImageInput> {
+  const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  const source = VISION_IMAGE_TYPES.has(mime) ? file : await rasterizeImage(file);
+  const mediaType = source === file ? mime : "image/png";
+  if (source.size > MAX_CHAT_IMAGE_BYTES) {
+    throw new Error("单张图片不能超过 4 MB");
+  }
+  return {
+    name: file.name.trim() || "图片",
+    mediaType,
+    data: await readBlob(source),
+  };
 }
 
 export interface ProjectOption {
@@ -219,12 +288,15 @@ export interface ComposerQueueItem {
 }
 
 export interface AgentChatComposerProps {
-  onSubmit: (value: string) => void | boolean | Promise<boolean | void>;
+  onSubmit: (
+    value: string,
+    images: ChatImageInput[]
+  ) => void | boolean | Promise<boolean | void>;
   isDisabled?: boolean;
   isRunning?: boolean;
   queue?: ComposerQueueItem[];
   onStop?: () => void;
-  onQueue?: (value: string) => void;
+  onQueue?: (value: string, images: ChatImageInput[]) => void;
   onSendQueued?: (id: string) => void;
   onRemoveQueued?: (id: string) => void;
   placeholder?: string;
@@ -267,6 +339,7 @@ export function AgentChatComposer({
 }: AgentChatComposerProps) {
   const toast = useAppToast();
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  const [encodingImages, setEncodingImages] = useState(false);
   const [composerValue, setComposerValue] = useState("");
 
   const composerInputRef = useRef<ChatComposerInputHandle>(null);
@@ -359,7 +432,11 @@ export function AgentChatComposer({
     setMentionState("idle");
   }, [mentionProjectId]);
 
-  function addFiles(files: File[]) {
+  function releaseAttachments(items: AttachmentItem[]) {
+    for (const item of items) URL.revokeObjectURL(item.previewUrl);
+  }
+
+  async function addFiles(files: File[]) {
     if (files.length === 0) return;
 
     const images = files.filter(isSupportedImageFile);
@@ -367,19 +444,43 @@ export function AgentChatComposer({
     const remaining = MAX_IMAGE_ATTACHMENTS - attachments.length;
     const accepted = images.slice(0, Math.max(0, remaining));
     const skippedLimit = images.length - accepted.length;
+    const failed: string[] = [];
 
     if (accepted.length > 0) {
-      setAttachments((prev) => {
-        const room = MAX_IMAGE_ATTACHMENTS - prev.length;
-        const next = accepted.slice(0, Math.max(0, room));
-        if (next.length === 0) return prev;
-        return [
-          ...prev,
-          ...next.map((file) => ({
-            id: `file-${++nextAttachmentIdRef.current}`,
-            name: file.name,
-          })),
-        ];
+      setEncodingImages(true);
+      const encoded: AttachmentItem[] = [];
+      try {
+        for (const file of accepted) {
+          try {
+            encoded.push({
+              id: `file-${++nextAttachmentIdRef.current}`,
+              name: file.name.trim() || "图片",
+              previewUrl: URL.createObjectURL(file),
+              image: await encodeVisionImage(file),
+            });
+          } catch (error) {
+            failed.push(error instanceof Error ? error.message : "图片无法识别");
+          }
+        }
+      } finally {
+        setEncodingImages(false);
+      }
+      if (encoded.length > 0) {
+        setAttachments((prev) => {
+          const room = MAX_IMAGE_ATTACHMENTS - prev.length;
+          const next = encoded.slice(0, Math.max(0, room));
+          releaseAttachments(encoded.slice(next.length));
+          if (next.length === 0) return prev;
+          return [...prev, ...next];
+        });
+      }
+    }
+
+    if (failed.length > 0) {
+      toast({
+        body: failed[0] ?? "图片无法识别",
+        type: "error",
+        uniqueID: "attachment-encode",
       });
     }
 
@@ -448,11 +549,22 @@ export function AgentChatComposer({
       });
   }
 
-  async function handleComposerSubmit(value: string) {
+  function takeImages(): ChatImageInput[] {
+    return attachments.map((item) => item.image);
+  }
+
+  function clearAttachments() {
+    setAttachments((current) => {
+      releaseAttachments(current);
+      return [];
+    });
+  }
+
+  async function handleComposerSubmit(value: string, images: ChatImageInput[]) {
     try {
-      const result = await onSubmit(value);
+      const result = await onSubmit(value, images);
       if (result !== false) {
-        setAttachments([]);
+        clearAttachments();
       }
     } catch {
       // Caller handles error reporting; preserve attachments on failure
@@ -467,15 +579,17 @@ export function AgentChatComposer({
       value={composerValue}
       onChange={setComposerValue}
       onSubmit={(value) => {
+        const images = takeImages();
         if (isRunning) {
-          onQueue?.(value);
+          onQueue?.(value, images);
+          clearAttachments();
           return;
         }
-        void handleComposerSubmit(value);
+        void handleComposerSubmit(value, images);
       }}
       isStopShown={isRunning && !hasDraft}
       onStop={onStop}
-      isDisabled={isDisabled}
+      isDisabled={isDisabled || encodingImages}
       placeholder={placeholder}
       input={
         <ChatComposerInput
@@ -553,15 +667,27 @@ export function AgentChatComposer({
               </VStack>
             ) : null}
             {attachments.map((item) => (
-              <Token
-                key={item.id}
-                label={item.name}
-                onRemove={() =>
-                  setAttachments((prev) =>
-                    prev.filter((entry) => entry.id !== item.id)
-                  )
-                }
-              />
+              <span key={item.id} className="chat-composer-attachment-wrap">
+                <img
+                  className="chat-composer-attachment"
+                  src={item.previewUrl}
+                  alt={item.name}
+                />
+                <button
+                  type="button"
+                  className="chat-composer-attachment-remove"
+                  aria-label="移除图片"
+                  onClick={() =>
+                    setAttachments((prev) => {
+                      const removed = prev.find((entry) => entry.id === item.id);
+                      if (removed) URL.revokeObjectURL(removed.previewUrl);
+                      return prev.filter((entry) => entry.id !== item.id);
+                    })
+                  }
+                >
+                  ×
+                </button>
+              </span>
             ))}
           </ChatComposerDrawer>
         ) : undefined

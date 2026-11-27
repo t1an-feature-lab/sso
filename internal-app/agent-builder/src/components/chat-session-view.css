@@ -268,3 +268,22 @@
 .chat-header-menu-divider {
   margin-block: var(--spacing-1);
 }
+.chat-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  margin-block-end: var(--spacing-2);
+}
+.chat-user-images:last-child {
+  margin-block-end: 0;
+}
+.chat-user-images img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(7.5rem, 100%);
+  max-height: 4.5rem;
+  border-radius: var(--radius-element);
+  object-fit: contain;
+  background: var(--color-neutral);
+}

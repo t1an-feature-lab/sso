@@ -82,3 +82,83 @@ export const OVERLAY_SCROLLBAR_SCRIPT = `(function () {
 export function overlayScrollbarMarkup(): string {
   return `<script>${OVERLAY_SCROLLBAR_SCRIPT}</script>`;
 }
+
+export const APP_OVERLAY_SCROLLBAR_SCRIPT = `(function () {
+  if (window.__abAppOverlayScroll) return;
+  window.__abAppOverlayScroll = true;
+  var thumb = document.createElement("div");
+  thumb.className = "ab-float-scroll";
+  var timer = 0;
+  var current = null;
+  var drag = null;
+  function place(node) {
+    if (!node) {
+      thumb.dataset.on = "false";
+      current = null;
+      return;
+    }
+    current = node;
+    var rect = node.getBoundingClientRect();
+    var view = Math.max(rect.height, 1);
+    var bar = Math.max(28, (node.clientHeight / Math.max(node.scrollHeight, 1)) * view);
+    var max = Math.max(0, view - bar);
+    var range = node.scrollHeight - node.clientHeight;
+    var y = rect.top + (range > 0 ? (node.scrollTop / range) * max : 0);
+    thumb.style.height = bar + "px";
+    thumb.style.transform = "translate(" + Math.max(0, rect.right - 8) + "px," + y + "px)";
+    thumb.dataset.on = "true";
+  }
+  function reveal(node) {
+    if (!node || node.scrollHeight <= node.clientHeight + 1) {
+      if (!drag) thumb.dataset.on = "false";
+      return;
+    }
+    place(node);
+    if (drag) return;
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (!drag) thumb.dataset.on = "false";
+    }, 700);
+  }
+  function mount() {
+    if (document.body && !thumb.isConnected) document.body.appendChild(thumb);
+  }
+  document.addEventListener("scroll", function (event) {
+    var target = event.target;
+    if (!target || target === document || target === document.documentElement || target === document.body) {
+      target = document.scrollingElement;
+    }
+    reveal(target);
+  }, true);
+  window.addEventListener("resize", function () {
+    if (current) reveal(current);
+  });
+  thumb.addEventListener("pointerdown", function (event) {
+    if (!current) return;
+    drag = { y: event.clientY, top: current.scrollTop, node: current };
+    thumb.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    place(current);
+  });
+  thumb.addEventListener("pointermove", function (event) {
+    if (!drag) return;
+    var node = drag.node;
+    var rect = node.getBoundingClientRect();
+    var bar = Math.max(28, (node.clientHeight / Math.max(node.scrollHeight, 1)) * rect.height);
+    var max = Math.max(1, rect.height - bar);
+    var range = node.scrollHeight - node.clientHeight;
+    node.scrollTop = drag.top + ((event.clientY - drag.y) / max) * range;
+    place(node);
+  });
+  function endDrag() {
+    drag = null;
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      thumb.dataset.on = "false";
+    }, 500);
+  }
+  thumb.addEventListener("pointerup", endDrag);
+  thumb.addEventListener("pointercancel", endDrag);
+  if (document.body) mount();
+  else document.addEventListener("DOMContentLoaded", mount);
+})();`;

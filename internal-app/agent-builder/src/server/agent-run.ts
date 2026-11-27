@@ -29,6 +29,12 @@ import {
   formatCommandResult,
   listProjectFiles,
 } from "./sandbox";
+import {
+  imagePartsFromJson,
+  readChatImage,
+  saveChatImages,
+  type ParsedChatImage,
+} from "./message-images";
 import { getChatSession } from "./sessions";
 
 const shellTool = tool({
@@ -158,6 +164,7 @@ export function runSessionAgent(options: {
   sessionId: string;
   modelId?: string | null;
   content?: string;
+  images?: ParsedChatImage[];
   continueExisting?: boolean;
   signal?: AbortSignal;
   onEvent: (event: string, data: unknown) => void;
@@ -170,6 +177,7 @@ async function executeSessionAgent(options: {
   sessionId: string;
   modelId?: string | null;
   content?: string;
+  images?: ParsedChatImage[];
   continueExisting?: boolean;
   signal?: AbortSignal;
   onEvent: (event: string, data: unknown) => void;
@@ -187,24 +195,35 @@ async function executeSessionAgent(options: {
   const project = existing.project;
 
   const content = (options.content ?? "").trim();
+  const images = options.images ?? [];
   if (!options.continueExisting) {
-    if (!content) throw new HttpError(400, "请输入消息内容");
+    if (!content && images.length === 0) throw new HttpError(400, "请输入消息内容");
+    const storedContent = content || "请查看图片";
     const shouldRename =
       existing.messages.length === 0 && existing.title === "新会话";
-    await db.chatMessage.create({
+    const message = await db.chatMessage.create({
       data: {
         sessionId: existing.id,
         role: "user",
-        content,
+        content: storedContent,
       },
     });
+    const storedImages = await saveChatImages(message.id, images);
+    if (storedImages.length > 0) {
+      await db.chatMessage.update({
+        where: { id: message.id },
+        data: { parts: storedImages as unknown as Prisma.InputJsonValue },
+      });
+    }
     await db.chatSession.update({
       where: { id: existing.id },
       data: {
         ...(shouldRename
           ? {
               title:
-                content.length > 36 ? `${content.slice(0, 36)}…` : content,
+                storedContent.length > 36
+                  ? `${storedContent.slice(0, 36)}…`
+                  : storedContent,
             }
           : {}),
         updatedAt: new Date(),
@@ -311,17 +330,41 @@ async function executeSessionAgent(options: {
       const files = await listProjectFiles(options.userId, project.id);
       options.onEvent("files", { files, previewUrl: null });
 
-      const messages: ModelMessage[] = reloaded.messages.map((message) => {
-        const parts = parseStoredParts(message.parts);
-        const text =
-          message.role === "assistant"
-            ? `${message.content}${toolHistory(parts)}`
-            : message.content;
-        return {
-          role: message.role === "assistant" ? "assistant" : "user",
-          content: text,
-        };
-      });
+      const messages: ModelMessage[] = await Promise.all(
+        reloaded.messages.map(async (message) => {
+          const parts = parseStoredParts(message.parts);
+          if (message.role === "assistant") {
+            return {
+              role: "assistant" as const,
+              content: `${message.content}${toolHistory(parts)}`,
+            };
+          }
+          const images = imagePartsFromJson(message.parts);
+          const text = message.content.trim();
+          if (images.length === 0) {
+            return { role: "user" as const, content: text };
+          }
+          const attached = await Promise.all(
+            images.map(async (image) => ({
+              name: image.name,
+              mediaType: image.mediaType,
+              bytes: await readChatImage(message.id, image.id),
+            }))
+          );
+          return {
+            role: "user" as const,
+            content: [
+              { type: "text" as const, text: text || "请查看图片" },
+              ...attached.map((image) => ({
+                type: "file" as const,
+                data: image.bytes,
+                mediaType: image.mediaType,
+                filename: image.name,
+              })),
+            ],
+          };
+        })
+      );
 
       const agent = new ToolLoopAgent({
         model: languageModel(modelConfig),
@@ -332,6 +375,7 @@ async function executeSessionAgent(options: {
           "pnpm dev、npm run dev、next dev、vite 以及其他不会自己退出的进程，必须把 background 设为 true。",
           "这类进程会留在容器内继续运行，日志在 .agent/procs/<id>.log，停止时 kill 对应 pid。",
           "预览只转发容器端口 3000、5173、4173、8080、8000，开发服务器优先监听 3000。",
+          "用户消息可能附带图片，回答时依据图片内容。",
           "完成后用中文说明结果，不要把大段命令日志原样贴回。",
         ].join("\n"),
         tools: { shell: shellTool },

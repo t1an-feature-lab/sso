@@ -72,6 +72,8 @@ import {
 } from "@/lib/chat-panel-prefs";
 import type {
   AvailableModelOption,
+  ChatImageInput,
+  ChatImagePart,
   ChatMessagePart,
   ChatSessionDetail,
   ChatStepPart,
@@ -113,8 +115,47 @@ type LiveDraft = {
 type QueuedTurn = {
   id: string;
   content: string;
+  images: ChatImageInput[];
   modelId: string | null;
 };
+
+function messageImages(parts: ChatMessagePart[]): ChatImagePart[] {
+  return parts.filter((part): part is ChatImagePart => part.type === "image");
+}
+
+function previewImages(images: ChatImageInput[]): ChatImagePart[] {
+  return images.map((image, index) => ({
+    type: "image",
+    id: `local-image-${index}`,
+    mediaType: image.mediaType,
+    name: image.name,
+    url: `data:${image.mediaType};base64,${image.data}`,
+  }));
+}
+
+function UserMessageContent({
+  content,
+  parts,
+}: {
+  content: string;
+  parts: ChatMessagePart[];
+}) {
+  const images = messageImages(parts);
+  const caption =
+    images.length > 0 && content.trim() === "请查看图片" ? "" : content;
+  return (
+    <>
+      {images.length > 0 ? (
+        <div className="chat-user-images">
+          {images.map((image) => (
+            <img key={image.id} src={image.url} alt={image.name} />
+          ))}
+        </div>
+      ) : null}
+      {caption}
+    </>
+  );
+}
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
@@ -878,11 +919,13 @@ export function ChatSessionView({
 
   async function runAgent(input: {
     content?: string;
+    images?: ChatImageInput[];
     continueExisting?: boolean;
     modelId?: string | null;
   }): Promise<boolean> {
     const content = input.content?.trim() ?? "";
-    if (!input.continueExisting && !content) return false;
+    const images = input.images ?? [];
+    if (!input.continueExisting && !content && images.length === 0) return false;
     if (stopQueueRef.current) return false;
 
     const modelId =
@@ -903,8 +946,8 @@ export function ChatSessionView({
             id: `local-${Date.now()}`,
             sessionId: prev.id,
             role: "user",
-            content,
-            parts: [],
+            content: content || "请查看图片",
+            parts: previewImages(images),
             modelIcon: null,
             artifactTitle: null,
             createdAt: new Date().toISOString(),
@@ -919,6 +962,7 @@ export function ChatSessionView({
         session.id,
         {
           content: input.continueExisting ? undefined : content,
+          images: input.continueExisting ? undefined : images,
           modelId,
           continueExisting: input.continueExisting,
         },
@@ -986,11 +1030,13 @@ export function ChatSessionView({
 
   async function drain(input: {
     content?: string;
+    images?: ChatImageInput[];
     continueExisting?: boolean;
     modelId?: string | null;
   }) {
     let current: {
       content?: string;
+      images?: ChatImageInput[];
       continueExisting?: boolean;
       modelId?: string | null;
     } | null = input;
@@ -1000,13 +1046,18 @@ export function ChatSessionView({
       const next = queueRef.current[0];
       if (!next) break;
       syncQueue(queueRef.current.slice(1));
-      current = { content: next.content, modelId: next.modelId };
+      current = {
+        content: next.content,
+        images: next.images,
+        modelId: next.modelId,
+      };
     }
     stopQueueRef.current = false;
   }
 
   function startRun(input: {
     content?: string;
+    images?: ChatImageInput[];
     continueExisting?: boolean;
     modelId?: string | null;
   }) {
@@ -1021,16 +1072,16 @@ export function ChatSessionView({
     });
   }
 
-  function handleQueue(content: string) {
+  function handleQueue(content: string, images: ChatImageInput[] = []) {
     const text = content.trim();
-    if (!text) return;
+    if (!text && images.length === 0) return;
     if (!runningRef.current) {
-      startRun({ content: text, modelId: selectedModelId });
+      startRun({ content: text, images, modelId: selectedModelId });
       return;
     }
     syncQueue([
       ...queueRef.current,
-      { id: nextQueueId(), content: text, modelId: selectedModelId },
+      { id: nextQueueId(), content: text, images, modelId: selectedModelId },
     ]);
   }
 
@@ -1040,7 +1091,11 @@ export function ChatSessionView({
     const rest = queueRef.current.filter((entry) => entry.id !== id);
     if (!runningRef.current) {
       syncQueue(rest);
-      startRun({ content: item.content, modelId: item.modelId });
+      startRun({
+        content: item.content,
+        images: item.images,
+        modelId: item.modelId,
+      });
       return;
     }
     stopQueueRef.current = false;
@@ -1072,14 +1127,14 @@ export function ChatSessionView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSession.id]);
 
-  function handleSend(value: string) {
+  function handleSend(value: string, images: ChatImageInput[] = []) {
     const text = value.trim();
-    if (!text) return;
+    if (!text && images.length === 0) return;
     if (runningRef.current) {
-      handleQueue(text);
+      handleQueue(text, images);
       return;
     }
-    startRun({ content: text, modelId: selectedModelId });
+    startRun({ content: text, images, modelId: selectedModelId });
   }
 
   return (
@@ -1430,7 +1485,10 @@ export function ChatSessionView({
                                 />
                               }
                             >
-                              {message.content}
+                              <UserMessageContent
+                                content={message.content}
+                                parts={message.parts}
+                              />
                             </ChatMessageBubble>
                           </ChatMessage>
                         ) : (
