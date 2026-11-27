@@ -43,8 +43,9 @@ function createPrismaClient(pool: Pool): PrismaClient {
 function getOrCreateDb(): PrismaClient {
   const pool = getPool();
   const cached = globalForDb.agentBuilderPrisma;
+  // Prisma returns a proxy, so instanceof does not reliably identify cached clients.
   if (
-    cached instanceof PrismaClient &&
+    cached &&
     globalForDb.agentBuilderPrismaPool === pool &&
     globalForDb.agentBuilderPrismaVersion === PRISMA_CLIENT_SCHEMA_VERSION &&
     typeof (cached as Partial<PrismaClient>).modelConfig?.findMany ===
@@ -53,6 +54,7 @@ function getOrCreateDb(): PrismaClient {
     return cached;
   }
   const next = createPrismaClient(pool);
+  if (cached) void cached.$disconnect().catch(() => undefined);
   globalForDb.agentBuilderPrisma = next;
   globalForDb.agentBuilderPrismaPool = pool;
   globalForDb.agentBuilderPrismaVersion = PRISMA_CLIENT_SCHEMA_VERSION;
@@ -60,11 +62,17 @@ function getOrCreateDb(): PrismaClient {
 }
 
 export function resetDatabaseClient(): void {
+  const client = globalForDb.agentBuilderPrisma;
+  const pool = globalForDb.agentBuilderPool;
   globalForDb.agentBuilderPool = undefined;
   globalForDb.agentBuilderPrisma = undefined;
   globalForDb.agentBuilderPrismaPool = undefined;
   globalForDb.agentBuilderPrismaVersion = undefined;
   globalForDb.agentBuilderAdminReady = undefined;
+  if (client) void client.$disconnect().catch(() => undefined);
+  if (pool && !pool.ending && !pool.ended) {
+    void pool.end().catch(() => undefined);
+  }
 }
 
 export function isDatabaseUnreachable(error: unknown): boolean {

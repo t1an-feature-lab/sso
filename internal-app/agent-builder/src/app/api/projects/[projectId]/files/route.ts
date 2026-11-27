@@ -5,7 +5,9 @@ import { handleApiError, HttpError } from "@/server/http";
 import { searchMentionableEntries } from "@/server/mention-files";
 import {
   ensureWorkspaceDir,
+  listProjectFiles,
   listWorkspaceEntries,
+  readPreviewServer,
   readWorkspaceFile,
   searchWorkspaceEntries,
 } from "@/server/sandbox";
@@ -29,6 +31,14 @@ export async function GET(
     }
 
     const url = new URL(request.url);
+    if (url.searchParams.get("snapshot") === "1") {
+      const [files, preview] = await Promise.all([
+        listProjectFiles(user.id, projectId),
+        readPreviewServer(projectId),
+      ]);
+      return NextResponse.json({ files, previewUrl: preview.previewUrl });
+    }
+
     const file = url.searchParams.get("file");
     if (file != null) {
       const content = await readWorkspaceFile(user.id, projectId, file);

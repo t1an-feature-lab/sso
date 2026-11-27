@@ -304,6 +304,10 @@ function containerName(projectId: string): string {
   return `ab-${projectId}`;
 }
 
+export function projectContainerName(projectId: string): string {
+  return containerName(projectId);
+}
+
 function samePath(left: string, right: string): boolean {
   try {
     return realpathSync(left) === realpathSync(right);

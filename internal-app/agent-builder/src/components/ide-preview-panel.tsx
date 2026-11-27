@@ -8,7 +8,6 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
-  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { Button } from "@astryxdesign/core/Button";
@@ -69,6 +68,10 @@ import {
 import { apiClient } from "@/lib/api-client";
 import { overlayScrollbarMarkup } from "@/lib/overlay-scrollbar";
 import { WorkspaceFileTree } from "@/components/workspace-file-tree";
+import {
+  ProjectTerminal,
+  releaseProjectTerminal,
+} from "@/components/project-terminal";
 import { createZipBlob } from "@/lib/zip";
 import type { ProjectFile } from "@/lib/types";
 import "./ide-preview-panel.css";
@@ -407,7 +410,6 @@ export function IdePreviewPanel({
   const [serverPhase, setServerPhase] = useState<
     "running" | "stopped" | "starting" | "stopping"
   >(previewBoot.origin ? "running" : "stopped");
-  const [terminalRunning, setTerminalRunning] = useState(false);
   const serverPhaseRef = useRef(serverPhase);
   serverPhaseRef.current = serverPhase;
   const previewOriginRef = useRef(previewOrigin);
@@ -446,15 +448,6 @@ export function IdePreviewPanel({
     setPathIndex(0);
     setPreviewKey((key) => key + 1);
   }, [devServerUrl]);
-
-  // Per-terminal tab state
-  const [terminalInputByTab, setTerminalInputByTab] = useState<
-    Record<string, string>
-  >({});
-  const [terminalEntriesByTab, setTerminalEntriesByTab] = useState<
-    Record<string, string[]>
-  >({});
-  const terminalOutputRef = useRef<HTMLPreElement>(null);
 
   // Publish dialog & Settings tab state
   const [publishOpen, setPublishOpen] = useState(false);
@@ -614,13 +607,6 @@ export function IdePreviewPanel({
     () => files.map((file) => file.path).join("\n"),
     [files]
   );
-  const terminalInput = terminalInputByTab[currentTabId] ?? "";
-  const defaultTerminalBanner = useMemo(
-    () => ["工作空间终端已连接到当前 Project\n"],
-    []
-  );
-  const terminalEntries =
-    terminalEntriesByTab[currentTabId] ?? defaultTerminalBanner;
 
   const activeFile = useMemo(() => {
     if (selectedPath && openedByPath[selectedPath]) {
@@ -647,13 +633,6 @@ export function IdePreviewPanel({
     collapsible: true,
     collapsedSize: 40,
   });
-
-  useEffect(() => {
-    if (terminalOutputRef.current) {
-      terminalOutputRef.current.scrollTop =
-        terminalOutputRef.current.scrollHeight;
-    }
-  }, [terminalEntries, currentTabId]);
 
   function commitPreviewPath(raw: string) {
     const next = normalizePreviewPath(raw, previewOrigin);
@@ -728,6 +707,10 @@ export function IdePreviewPanel({
   }
 
   function handleCloseTab(tabId: string) {
+    const closed = openTabs.find((item) => item.id === tabId);
+    if (projectId && closed?.type === "terminal") {
+      releaseProjectTerminal(projectId, tabId);
+    }
     writePersistedTabs(initialTabs, (prev) => {
       const closedIndex = prev.openTabs.findIndex((item) => item.id === tabId);
       if (closedIndex === -1) return prev;
@@ -790,56 +773,6 @@ export function IdePreviewPanel({
         uniqueID: "publish-app-ok",
       });
     }, 350);
-  }
-
-  async function handleRunTerminalCommand() {
-    if (!currentTabId || terminalRunning) return;
-    const cmd = terminalInput.trim();
-    setTerminalInputByTab((prev) => ({ ...prev, [currentTabId]: "" }));
-    if (!cmd) return;
-
-    if (cmd === "clear") {
-      setTerminalEntriesByTab((prev) => ({ ...prev, [currentTabId]: [] }));
-      return;
-    }
-
-    const tabId = currentTabId;
-    const appendEntry = (entry: string) => {
-      setTerminalEntriesByTab((prev) => ({
-        ...prev,
-        [tabId]: [...(prev[tabId] ?? defaultTerminalBanner), entry],
-      }));
-    };
-
-    if (!projectId) {
-      appendEntry(`$ ${cmd}\n当前会话没有 Project\n`);
-      return;
-    }
-
-    appendEntry(`$ ${cmd}\n`);
-    setTerminalRunning(true);
-    try {
-      const { result, files: nextFiles, previewUrl } =
-        await apiClient.runProjectCommand(projectId, cmd);
-      const output =
-        result.output.trim() ||
-        (result.status === "running" ? "进程已在后台运行" : "");
-      if (output) appendEntry(`${output}\n`);
-      onWorkspaceChange?.({ files: nextFiles, previewUrl });
-    } catch (error) {
-      appendEntry(
-        `${error instanceof Error ? error.message : "命令执行失败"}\n`
-      );
-    } finally {
-      setTerminalRunning(false);
-    }
-  }
-
-  function handleTerminalKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      handleRunTerminalCommand();
-    }
   }
 
   return (
@@ -1276,54 +1209,11 @@ export function IdePreviewPanel({
             defaultHostname={`${workspaceSlug}.workspace.local`}
           />
         ) : (
-          <div className="v0-terminal-root">
-            <div className="v0-code-header">
-              <HStack gap={2} vAlign="center">
-                <Icon icon={CommandLineIcon} size="sm" color="secondary" />
-                <Text type="label" color="secondary" maxLines={1}>
-                  bash · {projectName ?? title}
-                </Text>
-              </HStack>
-              <Button
-                label="清空"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  if (!currentTabId) return;
-                  setTerminalEntriesByTab((prev) => ({
-                    ...prev,
-                    [currentTabId]: [],
-                  }));
-                }}
-              />
-            </div>
-            <pre ref={terminalOutputRef} className="v0-terminal-output">
-              {terminalEntries.length > 0
-                ? terminalEntries.join("\n")
-                : "输入 help 查看可用命令"}
-            </pre>
-            <div className="v0-terminal-input-row">
-              <Text type="supporting" color="secondary">
-                $
-              </Text>
-              <input
-                type="text"
-                className="v0-terminal-input"
-                value={terminalInput}
-                disabled={terminalRunning}
-                onChange={(event) => {
-                  if (!currentTabId) return;
-                  setTerminalInputByTab((prev) => ({
-                    ...prev,
-                    [currentTabId]: event.target.value,
-                  }));
-                }}
-                onKeyDown={handleTerminalKeyDown}
-                placeholder="输入命令后按 Enter，clear 清空输出"
-                aria-label="终端命令输入"
-              />
-            </div>
-          </div>
+          <ProjectTerminal
+            projectId={projectId ?? null}
+            tabId={currentTabId}
+            onWorkspaceChange={onWorkspaceChange}
+          />
         )}
       </div>
 

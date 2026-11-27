@@ -3,7 +3,7 @@ export const OVERLAY_SCROLLBAR_SCRIPT = `(function () {
   window.__abOverlayScroll = true;
   var style = document.createElement("style");
   style.id = "ab-overlay-scroll";
-  style.textContent = "html,body,*{scrollbar-width:none!important}*::-webkit-scrollbar{width:0!important;height:0!important}.ab-float-scroll{position:fixed;right:3px;width:6px;border-radius:999px;background:color-mix(in srgb,CanvasText 46%,transparent);opacity:0;pointer-events:none;z-index:2147483646;transition:opacity 160ms ease;touch-action:none}.ab-float-scroll[data-on='true']{opacity:1;pointer-events:auto}";
+  style.textContent = "html,body,*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}.ab-float-scroll{position:fixed;right:3px;width:6px;border-radius:999px;background:color-mix(in srgb,CanvasText 46%,transparent);opacity:0;pointer-events:none;z-index:2147483646;transition:opacity 160ms ease;touch-action:none}.ab-float-scroll[data-on='true']{opacity:1;pointer-events:auto}";
   (document.head || document.documentElement).appendChild(style);
   var thumb = document.createElement("div");
   thumb.className = "ab-float-scroll";

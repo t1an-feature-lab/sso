@@ -411,4 +411,37 @@ export const apiClient = {
       method: "DELETE",
     });
   },
+
+  openProjectTerminal(
+    projectId: string,
+    cols: number,
+    rows: number
+  ): Promise<{ sessionId: string }> {
+    return request(`/api/projects/${encodeURIComponent(projectId)}/terminal`, {
+      method: "POST",
+      body: JSON.stringify({ cols, rows }),
+    });
+  },
+
+  writeProjectTerminal(
+    projectId: string,
+    sessionId: string,
+    body: { data?: string; cols?: number; rows?: number }
+  ): Promise<{ ok: true }> {
+    return request(
+      `/api/projects/${encodeURIComponent(projectId)}/terminal/${sessionId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  },
+
+  syncProjectSnapshot(
+    projectId: string
+  ): Promise<{ files: ProjectFile[]; previewUrl: string | null }> {
+    return request(
+      `/api/projects/${encodeURIComponent(projectId)}/files?snapshot=1`
+    );
+  },
 };
