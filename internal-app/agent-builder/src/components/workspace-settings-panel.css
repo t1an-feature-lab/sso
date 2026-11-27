@@ -1,0 +1,72 @@
+.ws-settings-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ws-settings-env-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--spacing-3);
+  align-items: start;
+}
+.ws-settings-dns-table {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  column-gap: var(--spacing-6);
+  row-gap: var(--spacing-1);
+}
+.ws-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--spacing-3);
+}
+.ws-settings-content {
+  padding: var(--spacing-6);
+}
+.ws-settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  height: 36px;
+  padding-inline: var(--spacing-2-5, 10px);
+  border: 0;
+  border-radius: var(--radius-element);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--type-label-font-size, 13px);
+  font-weight: 500;
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.ws-settings-nav-item:hover {
+  background: var(--color-overlay-hover);
+  color: var(--color-text-primary);
+}
+.ws-settings-nav-item[data-active="true"] {
+  background: var(--color-overlay-hover);
+  color: var(--color-text-primary);
+}
+.ws-settings-nav-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.ws-settings-title {
+  margin-block-start: calc((1em - 1lh) / 2);
+}
+@supports (text-box: trim-both cap alphabetic) {
+  .ws-settings-title {
+    margin-block-start: 0;
+    text-box: trim-start cap alphabetic;
+  }
+}

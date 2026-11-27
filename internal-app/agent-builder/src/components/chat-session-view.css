@@ -1,0 +1,190 @@
+.ai-chat-panel {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  width: var(--chat-panel-width);
+  max-width: max(320px, calc(100% - 360px));
+  flex-shrink: 0;
+  opacity: 1;
+}
+.ai-chat-panel[data-open="false"] {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.ai-chat-panel-inner {
+  width: var(--chat-panel-width);
+  max-width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.ai-chat-panel[data-transitioning="true"] .ai-chat-panel-inner {
+  min-width: var(--chat-panel-width);
+  max-width: none;
+}
+.ai-chat-resize-wrap {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-shrink: 0;
+  overflow: visible;
+  opacity: 1;
+}
+.ai-chat-resize-wrap[data-open="false"] {
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.ai-chat-resize-handle {
+  display: flex;
+}
+.ai-chat-resize-handle > :first-child {
+  width: 18px;
+  left: calc(50% + 3px);
+}
+.ai-chat-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  background: transparent;
+  pointer-events: none;
+  transition: background-color 140ms ease;
+}
+.ai-chat-resize-handle:hover::after,
+.ai-chat-resize-handle[data-resizing="true"]::after {
+  background: color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+.ai-chat-resize-handle:hover,
+.ai-chat-resize-handle[data-resizing="true"] {
+  background-color: var(--color-accent);
+}
+.ai-chat-workspace-panel {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ai-chat-resize-wrap[data-transitioning="true"] {
+    transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .ai-chat-panel[data-transitioning="true"] {
+    transition:
+      width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+@container workspace (max-width: 767px) {
+  .ai-chat-panel,
+  .ai-chat-panel[data-open="false"] {
+    width: 100%;
+    max-width: 100%;
+    flex: 1;
+    min-width: 0;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .ai-chat-panel-inner {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .ai-chat-resize-wrap,
+  .ai-chat-resize-handle,
+  .ai-chat-workspace-panel {
+    display: none;
+  }
+}
+@container (max-width: 380px) {
+  .ai-chat-panel .astryx-chat-message-bubble {
+    max-width: 100%;
+  }
+}
+.chat-header-toolbar [role="toolbar"] > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-header-toolbar [role="toolbar"] > :nth-child(2) {
+  flex-shrink: 0;
+}
+.chat-header-switcher-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 28px;
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 0 var(--spacing-1-5);
+  border: 0;
+  border-radius: var(--radius-element);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.chat-header-switcher-trigger > svg,
+.chat-header-switcher-trigger > span:last-child {
+  flex-shrink: 0;
+}
+.chat-header-switcher-trigger:hover,
+.chat-header-switcher-trigger[aria-expanded="true"] {
+  background: var(--color-overlay-hover);
+}
+.chat-header-switcher-label {
+  display: block;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-header-switcher-label--project {
+  max-width: 10rem;
+}
+.chat-header-switcher-label--session {
+  max-width: 14rem;
+}
+.chat-header-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.chat-header-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--spacing-1-5) var(--spacing-2);
+  border: 0;
+  border-radius: var(--radius-element);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.chat-header-menu-item:hover {
+  background: var(--color-overlay-hover);
+}
+.chat-header-menu-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.chat-header-menu-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-header-menu-divider {
+  margin-block: var(--spacing-1);
+}

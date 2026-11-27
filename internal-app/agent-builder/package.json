@@ -1,0 +1,48 @@
+{
+  "name": "agent-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3003",
+    "build": "next build",
+    "start": "next start --port 3003",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "0.7.16",
+    "@astryxdesign/theme-neutral": "0.7.16",
+    "@heroicons/react": "^2.2.0",
+    "@lobehub/icons-static-svg": "^1.106.0",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "@stylexjs/stylex": "0.19.2",
+    "next": "16.4.6",
+    "pg": "8.23.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "4.3.3",
+    "@types/node": "^20",
+    "@types/pg": "^8",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "prisma": "7.10.1",
+    "tailwindcss": "4.3.3",
+    "tsx": "^4",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@10.33.2"
+}

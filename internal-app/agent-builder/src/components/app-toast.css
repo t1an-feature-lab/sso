@@ -1,0 +1,27 @@
+@layer components {
+  .astryx-toast {
+    background-color: var(--color-info-muted);
+    color: var(--color-on-info-muted);
+  }
+
+  .astryx-toast:has([data-app-toast-status="success"]) {
+    background-color: var(--color-success-muted);
+    color: var(--color-on-success-muted);
+  }
+
+  .astryx-toast:has([data-app-toast-status="warning"]) {
+    background-color: var(--color-warning-muted);
+    color: var(--color-on-warning-muted);
+  }
+
+  .astryx-toast[data-type="error"] {
+    background-color: var(--color-error-muted);
+    color: var(--color-on-error-muted);
+  }
+
+  .astryx-toast > div {
+    color: inherit;
+    --color-text-primary: currentColor;
+    --color-icon-primary: currentColor;
+  }
+}

@@ -1,0 +1,134 @@
+@layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/core/tailwind-theme.css";
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@layer components {
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    font-family: var(--font-family-body, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  }
+
+  [data-astryx-theme] {
+    color: var(--color-text-primary);
+    font-family: var(--font-family-body);
+  }
+
+  [data-astryx-theme="neutral"] {
+    --shadow-low:
+      0 1px 1px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.28)),
+      0 2px 8px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.4)),
+      inset 0 0 0 1px light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.08));
+    --shadow-med:
+      0 1px 2px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.35)),
+      0 3px 10px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.48)),
+      inset 0 0 0 1px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.12));
+  }
+
+  /* Slim transparent-track scrollbars across all scrollable containers */
+  * {
+    --scrollbar-thumb: color-mix(in srgb, var(--color-text-primary, #171717) 48%, transparent);
+    --scrollbar-thumb-hover: color-mix(in srgb, var(--color-text-primary, #171717) 68%, transparent);
+    --scrollbar-track: transparent;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  @supports not (scrollbar-color: auto) {
+    * {
+      scrollbar-width: auto;
+    }
+
+    *::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    *::-webkit-scrollbar-track {
+      background: var(--scrollbar-track);
+    }
+
+    *::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 999px;
+    }
+
+    *::-webkit-scrollbar-thumb:hover {
+      background: var(--scrollbar-thumb-hover);
+    }
+  }
+
+  [popover="manual"]:has(> [data-toast-id]) {
+    align-items: center;
+  }
+
+  .astryx-dropdown-menu-radio {
+    order: 1;
+    margin-inline-start: auto;
+  }
+
+  .account-trigger {
+    display: block;
+    width: 100%;
+    padding: var(--spacing-2);
+    border: 0;
+    border-radius: var(--radius-element);
+    background: transparent;
+    color: var(--color-text-primary);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .account-trigger:hover,
+  .account-trigger[aria-expanded="true"] {
+    background: var(--color-overlay-hover);
+  }
+
+  .search-field {
+    width: 320px;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .page-transition-shell {
+    width: 100%;
+    height: 100%;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .page-transition-shell {
+      animation: page-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    }
+  }
+
+  @keyframes page-enter {
+    from {
+      opacity: 0;
+      translate: 0 8px;
+    }
+    to {
+      opacity: 1;
+      translate: none;
+    }
+  }
+}
+
+@view-transition {
+  navigation: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
